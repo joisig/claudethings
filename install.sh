@@ -52,6 +52,7 @@ new_permissions = [
     "Read(/tmp/bearnotes/**)",
     "Write(/tmp/bearnotes/**)",
     "Edit(/tmp/bearnotes/**)",
+    "Bash(mkdir -p /tmp/bearnotes)",
     f"Bash(python {os.path.expanduser('~/p/claudethings/bear_reader.py')}:*)",
     f"Bash({os.path.expanduser('~/p/claudethings/bear_reader.py')}:*)",
     "Skill(bear-notes)",
