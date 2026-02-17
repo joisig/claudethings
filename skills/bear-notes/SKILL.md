@@ -13,6 +13,8 @@ Access Joi's Bear notes database (read-only) using the `bear_reader.py` tool.
 /Users/joi/p/claudethings/bear_reader.py
 ```
 
+Always launch the tool using that path. Do not put python3 in front. I want to be able to "always allow" for invocations of just that particular file.
+
 ## Available Commands
 
 ### Query (raw SQL)
