@@ -39,21 +39,27 @@ def process_inline(text):
             result += "{\\b " + inner + "}"
         else:
             result += escape_rtf(part)
-    # Unicode: emit \uN with a plain-ASCII fallback byte after it
-    for char, code in [
-        ("\u2014", 8212),  # em dash
-        ("\u2013", 8211),  # en dash
-        ("\u00f3", 0xF3),  # ó
-        ("\u00ed", 0xED),  # í
-        ("\u00e9", 0xE9),  # é
-        ("\u00e1", 0xE1),  # á
-        ("\u00fa", 0xFA),  # ú
-        ("\u00f1", 0xF1),  # ñ
-        ("\u00fc", 0xFC),  # ü
-    ]:
-        if char in result:
-            result = result.replace(char, f"\\uc0\\u{code} ")
+
+    # Escape every non-ASCII codepoint as \uN. The file header declares
+    # \ansicpg1252, so unescaped non-ASCII bytes would otherwise be decoded
+    # via Windows-1252 and produce mojibake (Icelandic "æ ý ö þ ð",
+    # German umlauts, etc.). \uN takes a signed 16-bit int, so codepoints
+    # in [0x8000, 0xFFFF] are emitted as negative numbers, and codepoints
+    # above the BMP are emitted as a UTF-16 surrogate pair.
+    def escape_unicode(ch):
+        cp = ord(ch)
+        if cp <= 0xFFFF:
+            signed = cp if cp < 0x8000 else cp - 0x10000
+            return f"\\uc0\\u{signed} "
+        cp -= 0x10000
+        high = 0xD800 + (cp >> 10)
+        low = 0xDC00 + (cp & 0x3FF)
+        high_s = high if high < 0x8000 else high - 0x10000
+        low_s = low if low < 0x8000 else low - 0x10000
+        return f"\\uc0\\u{high_s} \\u{low_s} "
+    result = "".join(escape_unicode(c) if ord(c) > 127 else c for c in result)
     return result
+
 
 
 # ---------------------------------------------------------------------------
