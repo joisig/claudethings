@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs OUTSIDE the sandbox. Watches a FIFO for file paths and opens them in VSCode.
+# Usage: vscode-proxy-listen
+
+RUN_DIR="$HOME/.local/run"
+REQ_FIFO="$RUN_DIR/vscode-proxy-req"
+RESP_FIFO="$RUN_DIR/vscode-proxy-resp"
+
+mkdir -p "$RUN_DIR"
+[ -p "$REQ_FIFO" ] || mkfifo "$REQ_FIFO"
+[ -p "$RESP_FIFO" ] || mkfifo "$RESP_FIFO"
+
+echo "vscode-proxy: listening on $REQ_FIFO"
+
+while true; do
+  # Blocks until a writer opens the FIFO
+  filepath=$(cat "$REQ_FIFO")
+  [ -z "$filepath" ] && continue
+
+  echo "vscode-proxy: opening $filepath"
+  code --wait "$filepath"
+
+  # Signal completion
+  echo "done" > "$RESP_FIFO"
+done

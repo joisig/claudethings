@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Runs INSIDE the sandbox as $EDITOR. Sends file path to the listener via FIFO.
+# Blocks until the listener signals that VSCode has closed the file.
+# Usage: EDITOR=vscode-proxy
+
+RUN_DIR="$HOME/.local/run"
+REQ_FIFO="$RUN_DIR/vscode-proxy-req"
+RESP_FIFO="$RUN_DIR/vscode-proxy-resp"
+
+if [ -z "$1" ]; then
+  echo "vscode-proxy: no file specified" >&2
+  exit 1
+fi
+
+# Send the file path to the listener
+echo "$1" > "$REQ_FIFO"
+
+# Wait for the listener to signal completion
+cat "$RESP_FIFO" > /dev/null

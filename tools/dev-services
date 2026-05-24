@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Runs vscode-proxy listener in background + ngrok in foreground.
+# Ctrl+C stops both.
+
+trap 'kill $(jobs -p) 2>/dev/null; exit' INT TERM
+
+~/p/claudethings/tools/vscode-proxy-listen &
+ngrok start --all
