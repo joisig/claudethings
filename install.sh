@@ -6,6 +6,7 @@
 # - bear-notes: Read and search Bear notes
 # - clipboard-markdown: Copy markdown to clipboard as plain text
 # - clipboard-richtext: Copy markdown to clipboard as rich text (for Google Docs)
+# - daylog: Reconstruct what I was doing on a given day or week
 #
 
 set -e
@@ -23,18 +24,33 @@ echo "Making tools executable..."
 chmod +x "$SCRIPT_DIR/bear_reader.py"
 chmod +x "$SCRIPT_DIR/tools/md_to_clipboard.py"
 chmod +x "$SCRIPT_DIR/tools/md_to_rtf.py"
+chmod +x "$SCRIPT_DIR/tools/checkscreenshot.py"
 
 # ---------------------------------------------------------------------------
 # 2. Create skill directories and symlinks
 # ---------------------------------------------------------------------------
 echo "Linking skills..."
 
-for skill in bear-notes clipboard-markdown clipboard-richtext; do
+for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot; do
     skill_dir="$CLAUDE_DIR/skills/$skill"
     mkdir -p "$skill_dir"
     rm -f "$skill_dir/SKILL.md"
     ln -s "$SCRIPT_DIR/skills/$skill/SKILL.md" "$skill_dir/SKILL.md"
     echo "  $skill -> $skill_dir/SKILL.md"
+done
+
+# daylog ships more than a SKILL.md (config.sh, bin/, reference/), so the whole
+# directory is linked rather than the single file.
+for skill in daylog; do
+    chmod +x "$SCRIPT_DIR/skills/$skill/bin/$skill"
+    skill_dir="$CLAUDE_DIR/skills/$skill"
+    [ -L "$skill_dir" ] && rm -f "$skill_dir"
+    if [ -e "$skill_dir" ]; then
+        echo "  WARNING: $skill_dir exists and is not a symlink; leaving it alone"
+    else
+        ln -s "$SCRIPT_DIR/skills/$skill" "$skill_dir"
+        echo "  $skill -> $skill_dir"
+    fi
 done
 
 # ---------------------------------------------------------------------------
@@ -54,6 +70,7 @@ import os
 settings_file = os.path.expanduser("~/.claude/settings.json")
 tools_dir = os.path.expanduser("~/p/claudethings/tools")
 bear_reader = os.path.expanduser("~/p/claudethings/bear_reader.py")
+daylog = os.path.expanduser("~/.claude/skills/daylog/bin/daylog")
 
 # Permissions to add
 new_permissions = [
@@ -71,6 +88,12 @@ new_permissions = [
     # clipboard-richtext
     f"Bash({tools_dir}/md_to_rtf.py:*)",
     "Skill(clipboard-richtext)",
+    # checkscreenshot
+    f"Bash({tools_dir}/checkscreenshot.py:*)",
+    "Skill(checkscreenshot)",
+    # daylog (invoked through the ~/.claude symlink, as SKILL.md documents)
+    f"Bash({daylog}:*)",
+    "Skill(daylog)",
     # shared temp file
     "Write(/tmp/clipboard_content.md)",
 ]
@@ -120,6 +143,7 @@ echo "Skills installed:"
 echo "  - bear-notes:          Read and search Bear notes"
 echo "  - clipboard-markdown:  Copy markdown to clipboard as plain text"
 echo "  - clipboard-richtext:  Copy markdown to clipboard as rich text"
+echo "  - daylog:              Reconstruct a past working day or week"
 echo ""
 echo "Tools:"
 echo "  - $SCRIPT_DIR/bear_reader.py"

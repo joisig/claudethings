@@ -1,0 +1,506 @@
+#!/usr/bin/env bash
+# daylog — reconstruct what Joi was doing on a given day or week by pulling
+# from local git, GitHub, Google (sent mail + calendar) and Bear plan notes.
+#
+#   daylog range   <spec>              print the resolved FROM/TO and day list
+#   daylog git     <spec> [--stat]     commits across the configured repos
+#   daylog gh      <spec>              GitHub events, PRs, reviews, issues
+#   daylog google  <spec> [--received] calendar + sent mail per account
+#   daylog bear    <spec>              WPlan / DPlan entries for the range
+#   daylog all     <spec> [...]        everything above, in one pass
+#
+# <spec> is one of:
+#   today | yesterday | this-week | last-week
+#   2026-07-27                (single day)
+#   week:2026-07-23           (the Mon..Sun week containing that date)
+#   W31 | 2026-W31            (ISO week number)
+#   2026-07-20..2026-07-24    (explicit inclusive range)
+#
+# Every source degrades gracefully: if one is unauthenticated or missing, it
+# prints a NOTE line and the rest still runs.
+
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SELF_DIR")"
+# shellcheck disable=SC1091
+source "$SKILL_DIR/config.sh"
+
+DATE_BIN="$(command -v gdate 2>/dev/null || command -v date)"
+"$DATE_BIN" --version >/dev/null 2>&1 || {
+  echo "daylog: requires GNU date (brew install coreutils)" >&2; exit 1; }
+
+# Commits are filtered on *author* date (when the work was written), but git can
+# only pre-filter on commit date. Pull a padded commit-date window, then filter
+# exactly on author date. PAD covers rebases/amends that land days later.
+PAD_DAYS=${DAYLOG_PAD_DAYS:-45}
+
+die()  { echo "daylog: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+hdr()  { printf '\n===== %s =====\n' "$*"; }
+note() { printf '  NOTE: %s\n' "$*"; }
+
+monday_of() {
+  local d=$1 dow
+  dow=$("$DATE_BIN" -d "$d" +%u) || die "bad date: $d"
+  "$DATE_BIN" -d "$d -$((dow - 1)) days" +%F
+}
+
+# GNU date cannot parse ISO week strings like 2026-W31-1, so derive it:
+# ISO week 1 is the week containing Jan 4, hence Monday(week N) =
+# Monday(Jan 4) + (N-1) weeks.
+iso_week_monday() {
+  local y=$1 w=$2 base
+  [[ "$w" =~ ^[0-9]+$ ]] && ((w >= 1 && w <= 53)) || die "bad ISO week number: $w"
+  base=$(monday_of "$y-01-04")
+  "$DATE_BIN" -d "$base +$(( (w - 1) * 7 )) days" +%F
+}
+
+# resolve_range <spec> -> "FROM TO"
+resolve_range() {
+  local spec=${1:-today} from to
+  case "$spec" in
+    today)     from=$("$DATE_BIN" +%F);              to=$from ;;
+    yesterday) from=$("$DATE_BIN" -d yesterday +%F); to=$from ;;
+    this-week)
+      from=$(monday_of "$("$DATE_BIN" +%F)")
+      to=$("$DATE_BIN" -d "$from +6 days" +%F) ;;
+    last-week)
+      from=$(monday_of "$("$DATE_BIN" -d '7 days ago' +%F)")
+      to=$("$DATE_BIN" -d "$from +6 days" +%F) ;;
+    week:*)
+      from=$(monday_of "${spec#week:}")
+      to=$("$DATE_BIN" -d "$from +6 days" +%F) ;;
+    [0-9][0-9][0-9][0-9]-[Ww][0-9]*)
+      from=$(iso_week_monday "${spec%%-*}" "${spec##*[Ww]}")
+      to=$("$DATE_BIN" -d "$from +6 days" +%F) ;;
+    [Ww][0-9]*)
+      from=$(iso_week_monday "$("$DATE_BIN" +%G)" "${spec#[Ww]}")
+      to=$("$DATE_BIN" -d "$from +6 days" +%F) ;;
+    *..*)
+      from=${spec%%..*}; to=${spec##*..}
+      "$DATE_BIN" -d "$from" >/dev/null 2>&1 || die "bad range start: $from"
+      "$DATE_BIN" -d "$to"   >/dev/null 2>&1 || die "bad range end: $to" ;;
+    *)
+      "$DATE_BIN" -d "$spec" >/dev/null 2>&1 || die "unrecognized date spec: $spec"
+      from=$("$DATE_BIN" -d "$spec" +%F); to=$from ;;
+  esac
+  [[ "$from" > "$to" ]] && die "range start $from is after end $to"
+  echo "$from $to"
+}
+
+cmd_range() {
+  local from=$1 to=$2 d=$1
+  echo "from=$from to=$to (inclusive)"
+  while [[ ! "$d" > "$to" ]]; do
+    printf '  %s %s\n' "$d" "$("$DATE_BIN" -d "$d" +%a)"
+    d=$("$DATE_BIN" -d "$d +1 day" +%F)
+  done
+}
+
+# ---------------------------------------------------------------- git --------
+
+# A worktree dir is often named for its branch (…/bboo/main), so prefer the
+# remote's repo name and fall back to the directory basename.
+repo_label() {
+  local repo=$1 url name
+  url=$(git -C "$repo" config --get remote.origin.url 2>/dev/null)
+  name=$(basename "${url%.git}" 2>/dev/null)
+  [[ -n "$name" && "$name" != "/" ]] && { echo "$name"; return; }
+  basename "$repo"
+}
+
+cmd_git() {
+  local from=$1 to=$2 want_stat=${3:-}
+  local win_from win_to agent_re commits="" churn=""
+  win_from=$("$DATE_BIN" -d "$from -$PAD_DAYS days" +%F)
+  win_to=$("$DATE_BIN"   -d "$to +$PAD_DAYS days" +%F)
+  agent_re=$(IFS='|'; echo "${AGENT_AUTHORS[*]}")
+
+  hdr "GIT COMMITS $from .. $to"
+
+  local repo name author_args=() a
+  for a in "${AUTHORS[@]}"; do author_args+=(--author="$a"); done
+
+  for repo in "${REPOS[@]}"; do
+    if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+      note "repo not found or not a git repo: $repo"
+      continue
+    fi
+    name=$(repo_label "$repo")
+
+    # --all covers every branch, which includes all worktree branches since
+    # worktrees share the repo's refs. Merge commits are kept but marked.
+    commits+=$(git -C "$repo" log --all "${author_args[@]}" \
+                 --since="$win_from 00:00:00" --until="$win_to 23:59:59" \
+                 --date=format:'%Y-%m-%d %H:%M' \
+                 --pretty=format:"%ad%x09%h%x09%ae%x09%p%x09%s%x0a" 2>/dev/null \
+               | awk -F'\t' -v f="$from" -v t="$to" -v repo="$name" \
+                     -v agent="$agent_re" '
+                   NF < 5 { next }
+                   { split($1, dt, " "); d = dt[1] }
+                   d < f || d > t { next }
+                   {
+                     who = ($3 ~ "^(" agent ")$") ? "agent" : "joi"
+                     merge = (split($4, p, " ") > 1) ? "[merge] " : ""
+                     printf "%s  %-10s %-9s %-5s %s%s\n", $1, repo, $2, who, merge, $5
+                   }')$'\n'
+
+    [[ "$want_stat" == "--stat" ]] && churn+=$(
+      git -C "$repo" log --all "${author_args[@]}" \
+        --since="$win_from 00:00:00" --until="$win_to 23:59:59" \
+        --date=format:'%Y-%m-%d' --pretty=format:'%ad' --numstat 2>/dev/null \
+      | awk -v f="$from" -v t="$to" -v repo="$name" '
+          /^[0-9]{4}-[0-9][0-9]-[0-9][0-9]$/ { d = $1; next }
+          NF == 3 && d >= f && d <= t { add[d] += $1; del[d] += $2; files[d]++ }
+          END { for (d in add)
+                  printf "  %s  %-10s %d files, +%d/-%d\n",
+                         d, repo, files[d], add[d], del[d] }')$'\n'
+  done
+
+  if [[ -z "${commits//[[:space:]]/}" ]]; then
+    echo "  (no commits in range)"
+  else
+    echo "date       time  repo       sha       who   subject"
+    sort <<<"$commits" | grep -v '^[[:space:]]*$'
+  fi
+
+  if [[ -n "${churn//[[:space:]]/}" ]]; then
+    echo
+    echo "-- churn per day/repo --"
+    sort <<<"$churn" | grep -v '^[[:space:]]*$'
+  fi
+  return 0
+}
+
+# ----------------------------------------------------------------- gh --------
+
+cmd_gh() {
+  local from=$1 to=$2
+  hdr "GITHUB $from .. $to"
+
+  if ! have gh; then note "gh not installed"; return 0; fi
+  if ! gh auth status >/dev/null 2>&1; then
+    note "gh not authenticated — run: gh auth login"; return 0
+  fi
+
+  echo "-- activity events (repo-wide; ~30-90 day retention, 300 event cap) --"
+  local events
+  events=$(gh api "users/$GITHUB_USER/events" --paginate 2>/dev/null)
+  if [[ -n "$events" ]] && have jq; then
+    local oldest
+    oldest=$(jq -rs '[.[][].created_at] | min // empty' <<<"$events")
+    if [[ -n "$oldest" && "${oldest:0:10}" > "$from" ]]; then
+      note "events only go back to ${oldest:0:10}; earlier days rely on git + PR search"
+    fi
+    jq -rs --arg f "$from" --arg t "$to" '
+      def detail:
+        if   .type == "PushEvent"        then (.payload.ref // "" | sub("refs/heads/";""))
+        elif .type == "CreateEvent"      then "\(.payload.ref_type) \(.payload.ref // "")"
+        # GitHub trims event payloads for private repos: pull_request carries no
+        # title, so fall back to the head branch name. Titles for authored and
+        # reviewed PRs come from the search sections below.
+        elif .type == "PullRequestEvent" then "\(.payload.action) #\(.payload.number) \(.payload.pull_request.title // .payload.pull_request.head.ref // "")"
+        elif .type == "PullRequestReviewEvent"        then "#\(.payload.pull_request.number) \(.payload.pull_request.title // .payload.pull_request.head.ref // "")"
+        elif .type == "PullRequestReviewCommentEvent" then "#\(.payload.pull_request.number) \(.payload.pull_request.title // .payload.pull_request.head.ref // "")"
+        elif .type == "IssuesEvent"      then "\(.payload.action) #\(.payload.issue.number) \(.payload.issue.title // "")"
+        elif .type == "IssueCommentEvent" then "#\(.payload.issue.number) \(.payload.issue.title // "")"
+        else "" end;
+      [ .[][]
+        | select(.created_at[0:10] >= $f and .created_at[0:10] <= $t) ]
+      | if length == 0 then "  (no events in range)"
+        else
+          ( group_by(.created_at[0:10] + "|" + .repo.name + "|" + .type)[]
+            | "  \(.[0].created_at[0:10])  \(.[0].repo.name)  \(.[0].type|sub("Event";""))  x\(length)"
+              + ( [ .[] | detail | select(. != "" and . != " ") ] | unique
+                  | if length > 0 then "\n      " + join("\n      ") else "" end ) )
+        end' <<<"$events"
+  else
+    note "no events returned (or jq missing)"
+  fi
+
+  echo
+  echo "-- pull requests authored, updated in range --"
+  gh search prs --author="$GITHUB_USER" --updated="$from..$to" \
+    --json repository,number,title,updatedAt,state,url --limit 50 2>/dev/null \
+  | jq -r '.[] | "  \(.updatedAt[0:10])  \(.state|ascii_downcase|.[0:6])  \(.repository.nameWithOwner)#\(.number)  \(.title)"' \
+  | sort || note "PR search failed"
+
+  echo
+  echo "-- pull requests reviewed --"
+  gh search prs --reviewed-by="$GITHUB_USER" --updated="$from..$to" \
+    --json repository,number,title,updatedAt --limit 50 2>/dev/null \
+  | jq -r '.[] | "  \(.updatedAt[0:10])  \(.repository.nameWithOwner)#\(.number)  \(.title)"' \
+  | sort || true
+
+  echo
+  echo "-- issues involving me --"
+  gh search issues --involves="$GITHUB_USER" --updated="$from..$to" \
+    --json repository,number,title,updatedAt,state --limit 50 2>/dev/null \
+  | jq -r '.[] | "  \(.updatedAt[0:10])  \(.state|ascii_downcase|.[0:6])  \(.repository.nameWithOwner)#\(.number)  \(.title)"' \
+  | sort || true
+  return 0
+}
+
+# ------------------------------------------------------------- google --------
+
+# Emit the --cal/--all flags selecting which calendars to read for an account.
+# Joi holds owner rights on colleagues' calendars, so `--all` would report their
+# meetings as his. "auto" keeps his own account calendars plus group calendars
+# he owns, and drops colleagues, meeting rooms, holiday feeds and subscriptions.
+calendar_args() {
+  local acct=$1 own_re
+  case "${GOOGLE_CALENDARS[0]:-auto}" in
+    all)  echo "--all"; return ;;
+    auto) ;;
+    *)    printf -- '--cal=%s\n' "${GOOGLE_CALENDARS[@]}"; return ;;
+  esac
+
+  own_re=$(IFS='|'; echo "${GOOGLE_ACCOUNTS[*]}")
+  local picked
+  picked=$(gog -a "$acct" calendar calendars -p 2>/dev/null \
+    | awk -F'\t' -v own="$own_re" '
+        NR == 1 { next }
+        $1 ~ /#(holiday|contacts)@/ { next }
+        $1 ~ ("^(" own ")$")                                   { print $1; next }
+        $1 ~ /@group\.calendar\.google\.com$/ && $3 == "owner" { print $1 }')
+
+  if [[ -z "$picked" ]]; then
+    # Could not read the calendar list — fall back to the primary calendar
+    # rather than silently widening to everyone's.
+    echo "--cal=primary"
+    return
+  fi
+  printf -- '--cal=%s\n' $picked
+}
+
+# Strip the calendar-id and event-id columns and render one readable line per
+# event. Calendar output has no timezone-normalising flag, so times are shown in
+# the event's own zone and any offset that is not GMT is marked explicitly rather
+# than silently converted.
+compact_calendar() {
+  awk -F'\t' '
+    NR == 1 && $1 == "CALENDAR" { next }
+    NF < 7 { if (NF) print "    " $0; next }
+    # A blank summary means free/busy-only visibility — the same meeting is
+    # already listed with its title under whichever account owns it.
+    $7 ~ /^[ \t]*$/ { next }
+    {
+      s = $3; dow = $4; e = $5
+      if (s ~ /T/) {
+        sd = substr(s, 1, 10); st = substr(s, 12, 5)
+        et = (e ~ /T/) ? substr(e, 12, 5) : ""
+        when = st (et != "" ? "-" et : "")
+        off = ""
+        if (s !~ /(Z|\+00:00)$/ && match(s, /[+-][0-9][0-9]:[0-9][0-9]$/))
+          off = " (" substr(s, RSTART, RLENGTH) ")"
+        when = when off
+      } else {
+        sd = s; when = "all-day"
+      }
+      printf "    %s %-3s %-18s %s\n", sd, substr(dow, 1, 3), when, $7
+    }' | sort
+}
+
+# Collapse a message list into one line per conversation. A single thread can run
+# to 14 replies in a day, which buries every other subject in the day's output.
+# Input is the TSV from `gmail messages search`: ID THREAD DATE FROM SUBJECT LABELS.
+compact_mail() {
+  awk -F'\t' '
+    NR == 1 && $1 == "ID" { next }
+    NF < 5 { if (NF) print "    " $0; next }          # "No results", errors
+    {
+      s = $5
+      while (match(s, /^[ \t]*([Rr][Ee]|[Ff][Ww][Dd]?|[Ss][Vv]|[Vv][Ss])[ \t]*:[ \t]*/))
+        s = substr(s, RSTART + RLENGTH)
+      if (s == "") s = "(no subject)"
+      if (!(s in cnt) || $3 < mn[s]) mn[s] = $3
+      if (!(s in cnt) || $3 > mx[s]) mx[s] = $3
+      cnt[s]++
+    }
+    END {
+      for (s in cnt) {
+        span = (substr(mn[s], 1, 10) == substr(mx[s], 1, 10)) \
+               ? "" : "  .." substr(mx[s], 1, 10)
+        printf "    %s  x%-3d %s%s\n", mn[s], cnt[s], s, span
+      }
+    }' | sort
+}
+
+cmd_google() {
+  local from=$1 to=$2 want_received=${3:-}
+  local gm_from gm_to
+  gm_from=$("$DATE_BIN" -d "$from" +%Y/%m/%d)
+  gm_to=$("$DATE_BIN" -d "$to +1 day" +%Y/%m/%d)
+
+  hdr "GOOGLE (calendar + sent mail) $from .. $to"
+  if ! have gog; then note "gog not installed"; return 0; fi
+
+  # gog stores its config under ~/Library/Application Support/gogcli. If that is
+  # unreadable (sandbox / missing Full Disk Access), everything below fails with
+  # a keyring error — surface that once rather than per-account.
+  if ! gog auth list >/dev/null 2>&1; then
+    note "gog cannot read its config/keyring. If this is a sandbox or Full Disk"
+    note "Access problem, see reference/google-accounts-setup.md."
+    return 0
+  fi
+
+  local authed acct probe
+  authed=$(gog auth list -p 2>/dev/null | cut -f1)
+
+  for acct in "${GOOGLE_ACCOUNTS[@]}"; do
+    echo
+    echo "-- $acct --"
+    if ! grep -qxF "$acct" <<<"$authed"; then
+      note "not authorized yet — run: gog auth add $acct --services calendar,gmail --readonly"
+      continue
+    fi
+
+    # A stored refresh token can still be expired or revoked. Probe once so the
+    # fix is stated plainly instead of repeated as a raw OAuth error per query.
+    if ! probe=$(gog -a "$acct" calendar calendars --max 1 2>&1); then
+      if grep -qiE 'invalid_grant|expired or revoked' <<<"$probe"; then
+        note "token expired or revoked — re-run: gog auth add $acct --services calendar,gmail --readonly"
+      else
+        note "cannot reach this account: $(head -1 <<<"$probe")"
+      fi
+      continue
+    fi
+
+    echo "  [calendar]"
+    # Built with a read loop, not mapfile: macOS ships bash 3.2, which has neither
+    # mapfile nor safe expansion of an empty array under `set -u`.
+    local cal_args=() line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && cal_args+=("$line")
+    done < <(calendar_args "$acct")
+    # calendar --to is inclusive of that day; gmail before: is exclusive. Hence
+    # $to here but $gm_to (= day after $to) for the mail queries below.
+    gog -a "$acct" calendar events ${cal_args[@]+"${cal_args[@]}"} --from "$from" --to "$to" \
+      --max 250 --all-pages --weekday -p 2>&1 | compact_calendar \
+      || note "calendar query failed for $acct"
+
+    # Message-level, not thread-level: `gmail search` returns threads and shows
+    # the thread's latest date and sender, so a reply days later drags the thread
+    # into range under someone else's name. `messages search` reports each sent
+    # message with its own date.
+    echo "  [sent mail — one line per conversation, xN = messages sent]"
+    gog -a "$acct" gmail messages search "in:sent after:$gm_from before:$gm_to" \
+      --max 500 --all -p 2>&1 | compact_mail \
+      || note "sent-mail query failed for $acct"
+
+    if [[ "$want_received" == "--received" ]]; then
+      echo "  [received mail (non-promotional)]"
+      gog -a "$acct" gmail messages search \
+        "after:$gm_from before:$gm_to -category:promotions -category:social -in:sent" \
+        --max 500 --all -p 2>&1 | compact_mail || true
+    fi
+  done
+  return 0
+}
+
+# --------------------------------------------------------------- bear --------
+
+note_text() { "$BEAR_READER" note "$1" 2>/dev/null \
+  | jq -r 'if type=="array" then .[0] else . end | .ZTEXT // empty'; }
+
+# Print only the named top-level sections of a plan note. Headings are markdown
+# ("## DONE", "# DONE"); a section runs until the next heading of the same or a
+# shallower level. Bear appends fold markers like <!-- {"fold":true} --> to
+# headings, so match on the heading text prefix rather than the whole line.
+note_sections() {
+  local text=$1 want=$2
+  awk -v want="$want" '
+    function level(l,   n) { n = 0; while (substr(l, n + 1, 1) == "#") n++; return n }
+    /^#+ / {
+      lv = level($0)
+      title = $0; sub(/^#+ +/, "", title); sub(/[ \t]*<!--.*$/, "", title)
+      gsub(/[ \t]+$/, "", title)
+      # Literal compare: headings contain regex metacharacters like "Today?".
+      if (index("|" tolower(want) "|", "|" tolower(title) "|") > 0) {
+        inside = 1; cur = lv; print "  " $0; next
+      }
+      if (inside && lv <= cur) inside = 0
+    }
+    inside { print "  " $0 }
+  ' <<<"$text"
+}
+
+cmd_bear() {
+  local from=$1 to=$2 full=${3:-}
+  hdr "BEAR PLAN NOTES $from .. $to"
+
+  if [[ ! -x "$BEAR_READER" ]]; then
+    note "bear_reader.py not found/executable at $BEAR_READER"; return 0
+  fi
+  if ! "$BEAR_READER" search 'WPlan%' -f text >/dev/null 2>&1; then
+    note "Bear database unreadable (this shell needs Full Disk Access)"
+    return 0
+  fi
+
+  # One WPlan note per ISO week, titled "WPlan <monday> W<nn>". A range can span
+  # weeks, so walk every Monday it touches.
+  local mon last_mon title text
+  mon=$(monday_of "$from")
+  last_mon=$(monday_of "$to")
+  while [[ ! "$mon" > "$last_mon" ]]; do
+    echo
+    title=$("$BEAR_READER" search "WPlan $mon%" -f text 2>/dev/null \
+            | awk -F'\t' 'NR>1 {print $2; exit}')
+    if [[ -z "$title" ]]; then
+      note "no WPlan note found for week of $mon"
+    else
+      echo "-- $title --"
+      text=$(note_text "$title")
+      if [[ "$full" == "--full" ]]; then
+        sed 's/^/  /' <<<"$text"
+      else
+        # Everything else in a WPlan is standing backlog, not what happened.
+        note_sections "$text" "DONE|Plan|Journal"
+      fi
+    fi
+    mon=$("$DATE_BIN" -d "$mon +7 days" +%F)
+  done
+
+  echo
+  echo "-- DPlan / Could Do (live doc: DONE is recent, day labels are local) --"
+  text=$(note_text "DPlan / Could Do")
+  if [[ -z "$text" ]]; then
+    note "DPlan note not found"
+  elif [[ "$full" == "--full" ]]; then
+    sed 's/^/  /' <<<"$text"
+  else
+    # "Today?"/"Could do" are standing backlog, not a record of the day; only
+    # DONE says what actually happened. Use --full to see the whole note.
+    note_sections "$text" "DONE"
+  fi
+  return 0
+}
+
+# --------------------------------------------------------------- main --------
+
+sub=${1:-}; shift || true
+[[ -z "$sub" ]] && { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+
+spec=${1:-today}; shift || true
+# resolve_range runs in a subshell, so its die() cannot exit us — check the
+# result explicitly instead of trusting the exit status.
+RANGE=$(resolve_range "$spec") || exit 1
+read -r FROM TO <<<"$RANGE"
+[[ -n "${FROM:-}" && -n "${TO:-}" ]] || exit 1
+
+case "$sub" in
+  range)  cmd_range  "$FROM" "$TO" ;;
+  git)    cmd_git    "$FROM" "$TO" "${1:-}" ;;
+  gh)     cmd_gh     "$FROM" "$TO" ;;
+  google) cmd_google "$FROM" "$TO" "${1:-}" ;;
+  bear)   cmd_bear   "$FROM" "$TO" "${1:-}" ;;
+  all)
+    cmd_range  "$FROM" "$TO"
+    cmd_bear   "$FROM" "$TO"
+    cmd_google "$FROM" "$TO" "$(printf '%s\n' "$@" | grep -x -- --received || true)"
+    cmd_git    "$FROM" "$TO" "$(printf '%s\n' "$@" | grep -x -- --stat || true)"
+    cmd_gh     "$FROM" "$TO"
+    ;;
+  *) die "unknown subcommand: $sub (try: range git gh google bear all)" ;;
+esac
