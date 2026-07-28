@@ -274,32 +274,43 @@ calendar_args() {
   printf -- '--cal=%s\n' $picked
 }
 
-# Strip the calendar-id and event-id columns and render one readable line per
-# event. Calendar output has no timezone-normalising flag, so times are shown in
-# the event's own zone and any offset that is not GMT is marked explicitly rather
-# than silently converted.
+# Render one readable line per event from the JSON feed. JSON rather than the
+# TSV because the plain output omits the RSVP status, and "on the calendar" is
+# not the same as "attended" — a meeting never replied to or actively declined
+# has to be visibly distinct from one accepted. Also carries attendee count and
+# organiser, which separate real meetings from recurring self-reminders.
+# Times stay in the event's own zone (there is no normalising flag) and a
+# non-GMT offset is marked rather than silently converted.
 compact_calendar() {
-  awk -F'\t' '
-    NR == 1 && $1 == "CALENDAR" { next }
-    NF < 7 { if (NF) print "    " $0; next }
-    # A blank summary means free/busy-only visibility — the same meeting is
-    # already listed with its title under whichever account owns it.
-    $7 ~ /^[ \t]*$/ { next }
-    {
-      s = $3; dow = $4; e = $5
-      if (s ~ /T/) {
-        sd = substr(s, 1, 10); st = substr(s, 12, 5)
-        et = (e ~ /T/) ? substr(e, 12, 5) : ""
-        when = st (et != "" ? "-" et : "")
-        off = ""
-        if (s !~ /(Z|\+00:00)$/ && match(s, /[+-][0-9][0-9]:[0-9][0-9]$/))
-          off = " (" substr(s, RSTART, RLENGTH) ")"
-        when = when off
-      } else {
-        sd = s; when = "all-day"
-      }
-      printf "    %s %-3s %-18s %s\n", sd, substr(dow, 1, 3), when, $7
-    }' | sort
+  local own=$1
+  jq -r --arg own "$own" '
+    ($own | split(",")) as $mine
+    | [ .. | objects | select(.summary? and (.start? | type == "object")) ]
+    | unique_by([.start, .summary])[]
+    | . as $e
+    | (.attendees // []) as $att
+    | (.start.dateTime // .start.date // "") as $s
+    | (.end.dateTime // .end.date // "") as $en
+    # blank summary = free/busy-only visibility; the owning account lists it properly
+    | select((.summary // "") | test("^[[:space:]]*$") | not)
+    | ( if ($s | test("T"))
+        then ($s[11:16]) + (if ($en | test("T")) then "-" + $en[11:16] else "" end)
+             + (if ($s | test("(Z|\\+00:00)$")) then ""
+                else (($s | capture("(?<o>[+-][0-9][0-9]:[0-9][0-9])$").o // "")
+                      | if . == "" then "" else " (" + . + ")" end) end)
+        else "all-day" end ) as $when
+    | ([ $att[]? | select(.self == true) | .responseStatus ] | first) as $rsvp
+    | ( [ ( if   $rsvp == "declined"    then "DECLINED"
+            elif $rsvp == "needsAction" then "no reply"
+            elif $rsvp == "tentative"   then "maybe"
+            else empty end ),
+          ( if ($att | length) > 1 then "\($att | length) people" else empty end ),
+          ( (.organizer.email // "") as $o
+            | if $o != "" and ($mine | index($o) | not) and ($att | length) > 1
+              then "org \($o)" else empty end )
+        ] | join(" · ") ) as $tags
+    | "    \($s[0:10]) \(.startDayOfWeek[0:3] // "")  \($when)\("            "[0:(12 - ($when | length))] // "")  \(.summary)\(if $tags == "" then "" else "   — \($tags)" end)"
+  ' 2>/dev/null | sort
 }
 
 # Collapse a message list into one line per conversation. A single thread can run
@@ -376,9 +387,19 @@ cmd_google() {
     done < <(calendar_args "$acct")
     # calendar --to is inclusive of that day; gmail before: is exclusive. Hence
     # $to here but $gm_to (= day after $to) for the mail queries below.
-    gog -a "$acct" calendar events ${cal_args[@]+"${cal_args[@]}"} --from "$from" --to "$to" \
-      --max 250 --all-pages --weekday -p 2>&1 | compact_calendar \
-      || note "calendar query failed for $acct"
+    local cal_raw cal_out own
+    own=$(IFS=,; echo "${GOOGLE_ACCOUNTS[*]}")
+    cal_raw=$(gog -a "$acct" calendar events ${cal_args[@]+"${cal_args[@]}"} \
+                --from "$from" --to "$to" --max 250 --all-pages -j 2>&1)
+    cal_out=$(compact_calendar "$own" <<<"$cal_raw")
+    if [[ -n "$cal_out" ]]; then
+      echo "$cal_out"
+    elif grep -q '^[[:space:]]*[{[]' <<<"$cal_raw"; then
+      echo "    No events"
+    else
+      note "calendar query failed for $acct"
+      sed 's/^/    /' <<<"$cal_raw" | head -3
+    fi
 
     # Message-level, not thread-level: `gmail search` returns threads and shows
     # the thread's latest date and sender, so a reply days later drags the thread
