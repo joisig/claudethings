@@ -4,6 +4,8 @@
 # automatically because they share the repo's object database (`git log --all`).
 REPOS=(
   /Users/joi/w/protos
+  /Users/joi/w/cwcompliance
+  /Users/joi/w/crankwheel.com
   /Users/joi/q/bboo/main
   /Users/joi/c/somatic
   /Users/joi/snilli/k/kloi
