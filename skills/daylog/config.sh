@@ -45,3 +45,9 @@ GOOGLE_ACCOUNTS=(
 GOOGLE_CALENDARS=(auto)
 
 BEAR_READER=/Users/joi/p/claudethings/bear_reader.py
+
+# AI coding sessions. Claude Code writes one JSONL transcript per session under
+# <projects>/<encoded-cwd>/, with sub-agent transcripts in a subagents/ subdir;
+# Codex writes rollout-*.jsonl under <sessions>/YYYY/MM/DD/.
+CLAUDE_PROJECTS_DIR=~/.claude/projects
+CODEX_SESSIONS_DIR=~/.codex/sessions

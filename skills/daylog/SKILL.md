@@ -1,11 +1,11 @@
 ---
 name: daylog
-description: Reconstruct what Joi was doing on a given day, or day-by-day across a week (Mon-Sun), by combining Google Calendar and sent mail, git commits across his repos, GitHub activity, and his Bear WPlan/DPlan notes. Use when asked "what was I doing on <date>", "what did I do last week", "recap my week", "fill in my WPlan DONE", or any request to reconstruct past working days.
+description: Reconstruct what Joi was doing on a given day, or day-by-day across a week (Mon-Sun), by combining Google Calendar and sent mail, git commits across his repos, GitHub activity, his Claude Code and Codex sessions, and his Bear WPlan/DPlan notes. Use when asked "what was I doing on <date>", "what did I do last week", "recap my week", "fill in my WPlan DONE", or any request to reconstruct past working days.
 ---
 
 # Daylog — reconstruct a working day or week
 
-Answers "what was I doing?" for a past day or week by pulling four independent
+Answers "what was I doing?" for a past day or week by pulling five independent
 sources and reconciling them into a per-day narrative.
 
 ## Tool
@@ -15,7 +15,7 @@ sources and reconciling them into a per-day narrative.
 ```
 
 Always invoke it by that absolute path (so a single "always allow" rule covers
-it). Subcommands: `range`, `git`, `gh`, `google`, `bear`, `all`.
+it). Subcommands: `range`, `git`, `gh`, `google`, `bear`, `agents`, `all`.
 
 `<spec>` accepts:
 
@@ -41,8 +41,10 @@ Start with one call and read everything:
 
 `--stat` adds per-day/per-repo churn (files, +/- lines), useful for judging
 how heavy a coding day was. `--received` adds inbound mail (noisy; only when
-sent mail alone leaves the day unexplained). Run individual subcommands only
-when following up on one source.
+sent mail alone leaves the day unexplained). `--prompts=N` shows N prompts per
+agent session instead of 3, and `--full` shows every prompt at full width —
+reach for those when a day's theme is still unclear. Run individual
+subcommands only when following up on one source.
 
 Every source degrades independently. A `NOTE:` line means that source was
 unavailable — carry that into the answer rather than silently omitting it.
@@ -58,6 +60,12 @@ unavailable — carry that into the answer rather than silently omitting it.
   with no GitHub remote (cardinal). Covers all worktrees automatically.
 - **GitHub (`gh`)** — adds what local git cannot see: PR reviews, issue
   comments, branch creation, and repos not cloned locally.
+- **Agent sessions (`agents`)** — Claude Code (`cc`) and Codex (`cx`)
+  transcripts. Most days the work is driven through an agent, so this is the
+  finest-grained record there is: what Joi asked for, in his own words, at what
+  time, in which directory and branch. It is the only source that covers
+  investigation and analysis that produced no commit, no mail and no meeting —
+  a whole afternoon of querying production can leave no other trace.
 
 Repo → context: `protos` = CrankWheel, `bboo` = BellaBooks, `cardinal` =
 Quarter (local only, no remote), `kloi` = Klói agent (snilli-com), `somatic` =
@@ -95,6 +103,20 @@ These matter — getting them wrong produces confident, wrong recaps.
   and the PR/issue searches, which have no retention limit.
 - **Commits are filtered on author date** (when the work was written), not
   commit date, so rebased work lands on the day it was actually done.
+- **Agent sessions: `ev` is a proxy for effort, not time.** `ev` counts
+  transcript events (turns plus tool calls), `p` counts prompts Joi typed. A
+  session with a big `ev` and few prompts was long-running agent work; many
+  short prompts means hands-on iteration. The `effort by dir` line ranks the
+  day's directories by `ev` — read it first, then the prompts under whichever
+  session dominates.
+- **A session's clock span is not elapsed work.** `12:31-19:49` means the first
+  and last event of *that day*; he was in other sessions in between. Sessions
+  resumed across days appear once per day, so the same 8-char id on Monday and
+  Wednesday is one continuing thread of work.
+- **Prompts marked `[pasted output]`** are IEx or shell output Joi pasted back
+  in as evidence, not instructions he wrote. They show what he was looking at.
+- **Sub-agent transcripts are folded into their parent** (`sub=N`); their
+  prompts are Claude's, not Joi's, so only the parent's prompts are listed.
 - **Timezone is GMT year-round** (Iceland), so timestamps need no conversion.
 - **`bb` / `cw` prefixes** in plan notes mean BellaBooks and CrankWheel.
   `bbb`/`bbs`/`bbc` are BellaBooks sub-tags — don't over-read them.
@@ -105,10 +127,10 @@ These matter — getting them wrong produces confident, wrong recaps.
 2. For each day in range, write a short narrative that **leads with what he was
    actually working on**, not with a list of sources. Group by project
    (CrankWheel / BellaBooks / Quarter / personal), since that is how he plans.
-3. Reconcile rather than concatenate. Meetings, mail, commits and PRs on the
-   same theme are one thread of work — say so once. A branch name like
-   `joi-avoidTrackingBotsForVideoShares` plus a matching PR and commit is a
-   single item.
+3. Reconcile rather than concatenate. Meetings, mail, commits, PRs and agent
+   sessions on the same theme are one thread of work — say so once. A branch
+   name like `joi-avoidTrackingBotsForVideoShares` plus a matching PR, commit
+   and Claude Code session is a single item.
 4. Note the shape of the day where it's visible: mostly meetings vs mostly
    heads-down coding, which project dominated, anything that spilled across
    days.
@@ -133,6 +155,7 @@ Google is the one source needing per-account authorization; the others work out
 of the box. See `reference/google-accounts-setup.md` — it covers adding the
 three additional accounts and re-authorizing an expired token.
 
-Repos, accounts, author identities and the GitHub username live in
-`config.sh` next to this file. Add a repo by adding its path to `REPOS`;
-worktrees need no separate entry.
+Repos, accounts, author identities, the GitHub username and the agent
+transcript directories live in `config.sh` next to this file. Add a repo by
+adding its path to `REPOS`; worktrees need no separate entry. `agents` needs
+only `python3` and the transcript dirs, so it works out of the box.

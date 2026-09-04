@@ -7,6 +7,7 @@
 #   daylog gh      <spec>              GitHub events, PRs, reviews, issues
 #   daylog google  <spec> [--received] calendar + sent mail per account
 #   daylog bear    <spec>              WPlan / DPlan entries for the range
+#   daylog agents  <spec> [--full]     Claude Code / Codex sessions and prompts
 #   daylog all     <spec> [...]        everything above, in one pass
 #
 # <spec> is one of:
@@ -498,6 +499,211 @@ cmd_bear() {
   return 0
 }
 
+# ------------------------------------------------------------- agents --------
+
+# Claude Code and Codex transcripts are the record of the work Joi drove through
+# an agent — which on many days is most of the work, and the only source that
+# says what he was *trying* to do, in his own words, before any commit exists.
+cmd_agents() {
+  local from=$1 to=$2 full=0 maxp=3 a
+  shift 2
+  for a in "$@"; do
+    case "$a" in
+      --full)      full=1 ;;
+      --prompts=*) maxp=${a#--prompts=} ;;
+    esac
+  done
+
+  hdr "AI CODING SESSIONS $from .. $to"
+  if ! have python3; then note "python3 not installed"; return 0; fi
+
+  python3 - "$from" "$to" "$maxp" "$full" \
+    "${CLAUDE_PROJECTS_DIR/#\~/$HOME}" "${CODEX_SESSIONS_DIR/#\~/$HOME}" <<'PYEOF'
+import collections, datetime, glob, json, os, re, sys
+
+FROM, TO = sys.argv[1], sys.argv[2]
+MAXP, FULL = int(sys.argv[3]), sys.argv[4] == "1"
+CLAUDE_DIR, CODEX_DIR = os.path.expanduser(sys.argv[5]), os.path.expanduser(sys.argv[6])
+
+HOME = os.path.expanduser("~")
+# A session file is only worth opening if it was still being written on or after
+# FROM: its mtime is the timestamp of the last event in it.
+FLOOR = datetime.datetime.fromisoformat(FROM).timestamp()
+WIDTH = 400 if FULL else 150
+
+def newrec():
+    return {"ev": 0, "subs": set(), "prompts": [], "first": "", "last": "",
+            "cwd": "", "branch": ""}
+
+# (tool, session_id) -> day -> record
+S = collections.defaultdict(lambda: collections.defaultdict(newrec))
+
+def bump(rec, ts):
+    rec["ev"] += 1
+    if not rec["first"] or ts < rec["first"]:
+        rec["first"] = ts
+    if ts > rec["last"]:
+        rec["last"] = ts
+
+# Prompts arrive mixed with command wrappers, injected reminders and pasted
+# terminal output. Normalize to one legible line, or None to drop the entry.
+def clean(text):
+    t = text.strip()
+    if not t or t.startswith("Caveat:"):
+        return None
+    if t.startswith("<"):
+        m = re.search(r"<command-name>([^<]*)</command-name>", t)
+        if not m:
+            return None  # system-reminder, local-command-stdout, hook output
+        args = re.search(r"<command-args>([^<]*)</command-args>", t)
+        arg = args.group(1).strip() if args else ""
+        cmd = ("/" + m.group(1).lstrip("/") + (" " + arg if arg else "")).strip()
+        return None if cmd == "/clear" else cmd
+    # Joi pastes IEx output and shell transcripts back in as "prompts". They are
+    # evidence of what he was doing, but should not read as instructions.
+    pasted = len(t.splitlines()) > 2 and re.match(
+        r"^(iex\(|ubuntu@|[\w.-]+@[\w.-]+:|\$ |SELECT |=====|\{|\[)", t)
+    one = re.sub(r"\s+", " ", t)
+    if pasted:
+        one = "[pasted output] " + one
+    return one[:WIDTH] + ("…" if len(one) > WIDTH else "")
+
+def add_prompt(rec, text):
+    p = clean(text)
+    # Retyped/resubmitted prompts land twice in a row; count them once.
+    if p and (not rec["prompts"] or rec["prompts"][-1] != p):
+        rec["prompts"].append(p)
+
+def scan_claude():
+    if not os.path.isdir(CLAUDE_DIR):
+        return "Claude Code transcripts not found at %s" % CLAUDE_DIR
+    for path in sorted(glob.glob(os.path.join(CLAUDE_DIR, "*", "*.jsonl"))):
+        sid = os.path.basename(path)[:-6]
+        subs = glob.glob(os.path.join(path[:-6], "subagents", "*.jsonl"))
+        for f in [path] + subs:
+            if os.path.getmtime(f) < FLOOR:
+                continue
+            sub = None if f == path else os.path.basename(f)
+            for line in open(f, errors="replace"):
+                if '"timestamp"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                ts = d.get("timestamp") or ""
+                if not (FROM <= ts[:10] <= TO):
+                    continue
+                rec = S[("cc", sid)][ts[:10]]
+                bump(rec, ts)
+                if sub:
+                    rec["subs"].add(sub)
+                    continue
+                # cwd/branch can change mid-session (worktree switches); the
+                # first one of the day is where the day's work started.
+                if d.get("cwd") and not rec["cwd"]:
+                    rec["cwd"] = d["cwd"]
+                if d.get("gitBranch") and not rec["branch"]:
+                    rec["branch"] = d["gitBranch"]
+                if d.get("type") != "user" or d.get("isSidechain"):
+                    continue
+                content = d.get("message", {}).get("content")
+                if not isinstance(content, str):
+                    continue  # tool results arrive as content blocks
+                # 2.1+ records what the human actually typed; older sessions
+                # lack the field, so fall back to shape.
+                src = d.get("promptSource")
+                if (src == "typed") if src else (not d.get("isMeta")):
+                    add_prompt(rec, content)
+    return None
+
+def scan_codex():
+    if not os.path.isdir(CODEX_DIR):
+        return "Codex sessions not found at %s" % CODEX_DIR
+    for f in sorted(glob.glob(os.path.join(CODEX_DIR, "*", "*", "*", "*.jsonl"))):
+        if os.path.getmtime(f) < FLOOR:
+            continue
+        sid = re.sub(r"^rollout-\d{4}-\d\d-\d\dT[\d-]+?-(?=[0-9a-f]{8}-)", "",
+                     os.path.basename(f)[:-6])
+        cwd = ""
+        for line in open(f, errors="replace"):
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            ts = d.get("timestamp") or ""
+            p = d.get("payload") or {}
+            if d.get("type") == "session_meta":
+                cwd = p.get("cwd", "")
+            if not (FROM <= ts[:10] <= TO):
+                continue
+            rec = S[("cx", sid)][ts[:10]]
+            bump(rec, ts)
+            if not rec["cwd"]:
+                rec["cwd"] = cwd
+            item = p.get("item") or {}
+            if p.get("type") == "item_completed" and item.get("type") == "UserMessage":
+                add_prompt(rec, "".join(c.get("text", "")
+                                        for c in item.get("content", [])
+                                        if isinstance(c, dict)))
+    return None
+
+notes = [n for n in (scan_claude(), scan_codex()) if n]
+for n in notes:
+    print("  NOTE: %s" % n)
+
+byday = collections.defaultdict(list)
+for (tool, sid), days in S.items():
+    for day, rec in days.items():
+        byday[day].append((tool, sid, rec))
+
+def where_of(rec):
+    w = rec["cwd"] or "?"
+    if w.startswith(HOME + "/"):
+        w = w[len(HOME) + 1:]
+    if rec["branch"] and rec["branch"] not in ("master", "main"):
+        w += ":" + rec["branch"]
+    return w
+
+day = datetime.date.fromisoformat(FROM)
+end = datetime.date.fromisoformat(TO)
+while day <= end:
+    iso = day.isoformat()
+    rows = sorted(byday.get(iso, []), key=lambda r: r[2]["first"])
+    day += datetime.timedelta(days=1)
+    if not rows:
+        continue
+    # Where the day's effort went, so a heavy theme is visible before reading
+    # any prompt. Events are turns+tool calls, i.e. a proxy for time spent.
+    dirs = collections.Counter()
+    for _, _, rec in rows:
+        dirs[(rec["cwd"] or "?").split("/")[-1]] += rec["ev"]
+    print("\n-- %s %s --  %d sessions, %d prompts, %d events"
+          % (iso, datetime.date.fromisoformat(iso).strftime("%a"), len(rows),
+             sum(len(r[2]["prompts"]) for r in rows),
+             sum(r[2]["ev"] for r in rows)))
+    print("   effort by dir: %s"
+          % ", ".join("%s %d" % kv for kv in dirs.most_common(6)))
+    for tool, sid, rec in rows:
+        # A session with no typed prompt and almost no activity is a stray
+        # resume or a /clear — it says nothing about the day.
+        if not rec["prompts"] and rec["ev"] < 10:
+            continue
+        print(("  %s-%s %s %-26s %-8s p=%-3d ev=%-5d%s"
+               % (rec["first"][11:16], rec["last"][11:16], tool, where_of(rec),
+                  sid[:8] if tool == "cc" else sid[-8:],
+                  len(rec["prompts"]), rec["ev"],
+                  " sub=%d" % len(rec["subs"]) if rec["subs"] else "")).rstrip())
+        shown = rec["prompts"] if FULL else rec["prompts"][:MAXP]
+        for p in shown:
+            print("       . %s" % p)
+        if len(rec["prompts"]) > len(shown):
+            more = len(rec["prompts"]) - len(shown)
+            print("       . … %d more prompt%s" % (more, "" if more == 1 else "s"))
+PYEOF
+  return 0
+}
+
 # --------------------------------------------------------------- main --------
 
 sub=${1:-}; shift || true
@@ -516,12 +722,14 @@ case "$sub" in
   gh)     cmd_gh     "$FROM" "$TO" ;;
   google) cmd_google "$FROM" "$TO" "${1:-}" ;;
   bear)   cmd_bear   "$FROM" "$TO" "${1:-}" ;;
+  agents) cmd_agents "$FROM" "$TO" "$@" ;;
   all)
     cmd_range  "$FROM" "$TO"
     cmd_bear   "$FROM" "$TO"
     cmd_google "$FROM" "$TO" "$(printf '%s\n' "$@" | grep -x -- --received || true)"
     cmd_git    "$FROM" "$TO" "$(printf '%s\n' "$@" | grep -x -- --stat || true)"
     cmd_gh     "$FROM" "$TO"
+    cmd_agents "$FROM" "$TO" "$@"
     ;;
-  *) die "unknown subcommand: $sub (try: range git gh google bear all)" ;;
+  *) die "unknown subcommand: $sub (try: range git gh google bear agents all)" ;;
 esac
