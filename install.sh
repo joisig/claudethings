@@ -31,7 +31,7 @@ chmod +x "$SCRIPT_DIR/tools/checkscreenshot.py"
 # ---------------------------------------------------------------------------
 echo "Linking skills..."
 
-for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot; do
+for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot ship-branch; do
     skill_dir="$CLAUDE_DIR/skills/$skill"
     mkdir -p "$skill_dir"
     rm -f "$skill_dir/SKILL.md"
