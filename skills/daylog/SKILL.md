@@ -165,18 +165,16 @@ Mon
 * cw ~8h (of 11)
 ```
 
-Tags used in bullets:
-* cw for CrankWheel
-* bb for Bella Books
-* bbb would indicate "Bella Books bug" (sometimes used in my own bullets and can continue to use)
-* q for Quarter (projects like kloi, stuff under snilli, Somatic, Cardinal, paying Rodion's salaries)
-* p for personal stuff
-
 - **Day header** is the bare three-letter day (`Mon`, `Tue`, …) on its own
   line, not a Markdown heading.
-- **Every bullet starts with a project tag**: `cw` CrankWheel, `bb` BellaBooks,
-  `q` Quarter / Snilli / Joi's own tooling (cardinal, kloi, claudethings), `gh`
-  Grosvenor Holdings, `p` personal.
+- **Every bullet starts with a project tag**:
+  - `cw` CrankWheel
+  - `bb` Bella Books. `bbb` marks a Bella Books bug; Joi uses it in his own
+    bullets and it can be used in generated ones too.
+  - `q` Quarter: kloi, stuff under snilli, Somatic, Cardinal, Joi's own tooling
+    (claudethings), and admin like paying Rodion's salary
+  - `gh` Grosvenor Holdings (the eignarhaldsfélag)
+  - `p` personal
 - **Group bullets by project**, the project that took most of the day first,
   `p` items last.
 - **The hours line is always the last bullet of the day**:
