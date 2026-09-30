@@ -143,6 +143,120 @@ These matter — getting them wrong produces confident, wrong recaps.
 For a week request, give a per-day section plus a short "themes of the week"
 summary at the end.
 
+When Joi asks for the day "in WPlan DONE format" or to "fill in my DONE", skip
+the narrative and produce DONE bullets as described next.
+
+## WPlan DONE format
+
+DONE is a record of to-do items Joi ticked off, not a changelog — the details
+already live in git, PRs and mail. A bullet should read like the line he would
+have written on his to-do list that morning and then moved to DONE.
+
+### Layout
+
+```
+Mon
+* cw Addressed review findings on Salesforce Event-on-viewer-join, PR-2243
+* cw Fixed late noauth links not being admitted from the waiting room (Empower), PR-2244
+* cw 1:1 with Rodion
+* bb Committed DK purchasing tests T1–T6, booked test receipts in the DK GUI
+* q Added a ship-branch skill
+* p Gym
+* cw ~8h (of 11)
+```
+
+Tags used in bullets:
+* cw for CrankWheel
+* bb for Bella Books
+* bbb would indicate "Bella Books bug" (sometimes used in my own bullets and can continue to use)
+* q for Quarter (projects like kloi, stuff under snilli, Somatic, Cardinal, paying Rodion's salaries)
+* p for personal stuff
+
+- **Day header** is the bare three-letter day (`Mon`, `Tue`, …) on its own
+  line, not a Markdown heading.
+- **Every bullet starts with a project tag**: `cw` CrankWheel, `bb` BellaBooks,
+  `q` Quarter / Snilli / Joi's own tooling (cardinal, kloi, claudethings), `gh`
+  Grosvenor Holdings, `p` personal.
+- **Group bullets by project**, the project that took most of the day first,
+  `p` items last.
+- **The hours line is always the last bullet of the day**:
+  `* cw ~Xh (of Y)`. See "Estimating hours" below.
+- A sub-bullet (`  * …`, two-space indent) is for a follow-up or open question
+  Joi will want to act on. Use it rarely, never for implementation detail.
+
+### Level of detail
+
+- **One bullet = one ticked-off task.** Verb-first or a short noun phrase,
+  around 12 words, never more than one line.
+- **What was achieved, not how.** No parenthetical lists of sub-changes, no
+  function/module/table names, no step-by-step investigation notes.
+- **One thread of work = one bullet.** A branch, its commits, its PR, the agent
+  session that built it and the mail about it are one item.
+- **Multi-day work: say what moved that day** ("Studi launch guard: plan
+  reviewed, built as PR-2246"), not the whole feature again.
+- **Don't repeat** anything already in that day's DONE.
+
+Too detailed (a real past entry):
+
+> * cw Salesforce Event created when a viewer joins or recording starts:
+>   worked through the review findings (bounded the lock to one POST, kept
+>   pending rows at close, reported late creates after close, kept enrichment
+>   lines when the session report rewrites the Description), merged master,
+>   PR #2243 for M182
+
+About right:
+
+> * cw Addressed review findings on Salesforce Event-on-viewer-join, PR-2243
+
+### References
+
+- **Never write `#`.** Bear turns `#word` into a tag in its sidebar, so `#2243`
+  pollutes the tag namespace. Write `PR-2243`, `issue-2110`.
+- Include a PR/issue number only when the item is *about* that PR or issue
+  ("Reviewed PR-2180 and PR-2209"). Never commit hashes.
+
+### Meetings and mail
+
+- **One bullet per meeting** ("cw 1:1 with Birta", "bb ECIT
+  innleiðingarfundur"), only for meetings not declined and with some evidence
+  they happened. Recurring self-reminders are not meetings.
+- **A mail thread gets its own bullet only if it was real work** ("cw Replied
+  to Studi on the latency complaints"). No catch-all "Mail: thread A, thread B,
+  …" bullets; drop routine replies and automated sends.
+
+### Language
+
+New bullets in English. Keep Icelandic names, thread subjects and DK terms as
+they are. Never rewrite or translate Joi's own existing bullets.
+
+### Estimating hours
+
+`* cw ~Xh (of Y)` = roughly X hours on CrankWheel out of Y hours of work that
+day.
+
+- **Y is all work, all projects**: coding, agent sessions, meetings, mail, work
+  travel and conference time. Not gym, family or errands.
+- **Build the day's timeline** from every timestamped source — agent prompts,
+  commits, sent mail, meetings that happened, GitHub events. Merge events less
+  than ~30–45 min apart into one block; a block runs from its first event to
+  its last, plus ~15 min.
+- **Count Joi's attention, not agent run time.** Parallel agent sessions in the
+  same block count once. A long unattended agent run counts only while other
+  evidence shows him working.
+- **Attribute each block to a project** by repo, directory, mail account or
+  meeting; split mixed blocks by share of activity.
+- Round X and Y to the half hour; write Y without a tilde, as in
+  `~8h (of 11)`.
+- **Show the working in the reply, not the bullet**: after the bullets, list
+  the blocks counted in a line or two and say where evidence was thin, so Joi
+  can correct the numbers.
+
+### Output
+
+Put the bullets in a fenced code block so the terminal doesn't render the `*`
+markers and Joi can paste straight into Bear. The hours working goes below the
+code block.
+
 ## Writing back to Bear
 
 `bear_reader.py` is **read-only**; this skill cannot edit notes. If Joi wants
