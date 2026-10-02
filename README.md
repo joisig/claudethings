@@ -31,4 +31,5 @@ its Claude Code sessions and the predicted merge conflicts. To use the skill in
 another repo, link it there the same way and see "Other repositories" in its SKILL.md.
 
 `global/CLAUDE.md` is my global instructions file. `install.sh` links it to
-`~/.claude/CLAUDE.md`.
+`~/.claude/CLAUDE.md`. `commands/commit.md` is my `/commit` command, linked to
+`~/.claude/commands/commit.md` in the same way.

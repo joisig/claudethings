@@ -76,6 +76,16 @@ fi
 ln -sfn "$SCRIPT_DIR/global/CLAUDE.md" "$global_md"
 echo "  CLAUDE.md -> $global_md"
 
+# The /commit command is kept in this repo and linked, in the same way.
+commit_md="$CLAUDE_DIR/commands/commit.md"
+mkdir -p "$CLAUDE_DIR/commands"
+if [ -e "$commit_md" ] && [ ! -L "$commit_md" ]; then
+    mv "$commit_md" "$commit_md.bak"
+    echo "  Backed up the existing commands/commit.md to commit.md.bak"
+fi
+ln -sfn "$SCRIPT_DIR/commands/commit.md" "$commit_md"
+echo "  commands/commit.md -> $commit_md"
+
 # ---------------------------------------------------------------------------
 # 3. Backup and update settings.json with permissions
 # ---------------------------------------------------------------------------
