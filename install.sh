@@ -8,6 +8,7 @@
 # - clipboard-richtext: Copy markdown to clipboard as rich text (for Google Docs)
 # - daylog: Reconstruct what I was doing on a given day or week
 # - advreview: Adversarial review by Codex of the current code changes or plan
+# - wtconsolidate: Consolidate finished worktree work on main (linked into bboo only)
 #
 
 set -e
@@ -55,6 +56,17 @@ for skill in daylog advreview; do
     fi
 done
 
+# wtconsolidate is linked per repository, not globally: for now only into the bboo
+# main worktree. The link is kept out of that repo's git through info/exclude.
+chmod +x "$SCRIPT_DIR/skills/wtconsolidate/bin/wtsurvey"
+bboo_main="$HOME/q/bboo/main"
+if [ -d "$bboo_main/.claude/skills" ]; then
+    ln -sfn "$SCRIPT_DIR/skills/wtconsolidate" "$bboo_main/.claude/skills/wtconsolidate"
+    grep -qxF '.claude/skills/wtconsolidate' "$bboo_main/.git/info/exclude" ||
+        echo '.claude/skills/wtconsolidate' >> "$bboo_main/.git/info/exclude"
+    echo "  wtconsolidate -> $bboo_main/.claude/skills/wtconsolidate"
+fi
+
 # The global instructions file (~/.claude/CLAUDE.md) is kept in this repo and linked.
 global_md="$CLAUDE_DIR/CLAUDE.md"
 if [ -e "$global_md" ] && [ ! -L "$global_md" ]; then
@@ -83,6 +95,7 @@ tools_dir = os.path.expanduser("~/p/claudethings/tools")
 bear_reader = os.path.expanduser("~/p/claudethings/bear_reader.py")
 daylog = os.path.expanduser("~/.claude/skills/daylog/bin/daylog")
 advreview = os.path.expanduser("~/.claude/skills/advreview/bin/advreview")
+wtsurvey = os.path.expanduser("~/p/claudethings/skills/wtconsolidate/bin/wtsurvey")
 
 # Permissions to add
 new_permissions = [
@@ -111,6 +124,9 @@ new_permissions = [
     # advreview (same: invoked through the ~/.claude symlink)
     f"Bash({advreview}:*)",
     "Skill(advreview)",
+    # wtconsolidate (the survey tool is read-only; the skill is linked into bboo only)
+    f"Bash({wtsurvey}:*)",
+    "Skill(wtconsolidate)",
     # shared temp file
     "Edit(/tmp/clipboard_content.md)",
 ]

@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""wtsurvey - read-only facts about a repo's worktrees, for the wtconsolidate skill.
+
+  wtsurvey survey [--repo DIR] [--only NAME,NAME] [--exclude NAME,NAME]
+      One block per worktree (branch, dirt, ahead/behind the trunk, Claude Code
+      sessions), then merge predictions, the last commit all worktrees share,
+      and the consolidate-* tags.
+
+  wtsurvey tail <worktree-dir> [-n COUNT] [--sessions MAX]
+      The last COUNT user/assistant messages of the Claude Code sessions that
+      ran in that worktree (live sessions first, then the most recent ones).
+
+  wtsurvey tests [--repo DIR]
+      The test log that consolidations keep (tmp/<date>-wtconsolidate/test-log.jsonl
+      in the trunk), newest first, with how much each entry's paths have changed
+      since the commit it was tested on.
+
+Nothing here writes to a repository or a working tree. Merge predictions use
+`git merge-tree`, which merges in the object store only.
+"""
+
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+CLAUDE_DIR = os.path.expanduser("~/.claude")
+# Tool results and long replies are cut to this many characters in `tail`.
+TEXT_LIMIT = 1500
+TOOL_LIMIT = 200
+
+
+def git(repo, *args, check=True):
+    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        sys.exit(f"git {' '.join(args)} failed in {repo}:\n{proc.stderr.strip()}")
+    return proc
+
+
+def out(repo, *args):
+    return git(repo, *args).stdout.strip()
+
+
+def worktrees(repo):
+    """All worktrees of the repo, the main one (the trunk) first."""
+    result, current = [], {}
+    for line in out(repo, "worktree", "list", "--porcelain").splitlines() + [""]:
+        if not line:
+            if current:
+                result.append(current)
+            current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            current["path"] = value
+        elif key == "HEAD":
+            current["head"] = value
+        elif key == "branch":
+            current["branch"] = value.removeprefix("refs/heads/")
+        elif key in ("detached", "prunable", "bare"):
+            current[key] = True
+    return result
+
+
+def age(epoch_seconds):
+    minutes = int((time.time() - epoch_seconds) / 60)
+    if minutes < 90:
+        return f"{minutes}m ago"
+    if minutes < 48 * 60:
+        return f"{minutes // 60}h ago"
+    return f"{minutes // (60 * 24)}d ago"
+
+
+def live_sessions():
+    sessions = []
+    for path in glob.glob(os.path.join(CLAUDE_DIR, "sessions", "*.json")):
+        try:
+            with open(path) as f:
+                sessions.append(json.load(f))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return sessions
+
+
+def sessions_in(sessions, wt_path):
+    real = os.path.realpath(wt_path)
+    found = []
+    for s in sessions:
+        cwd = os.path.realpath(s.get("cwd", ""))
+        if cwd == real or cwd.startswith(real + os.sep):
+            found.append(s)
+    return found
+
+
+def project_dir(wt_path):
+    """Where Claude Code keeps the transcripts of sessions started in wt_path."""
+    slug = "".join(c if c.isalnum() else "-" for c in os.path.realpath(wt_path))
+    return os.path.join(CLAUDE_DIR, "projects", slug)
+
+
+def merge_prediction(repo, ours, theirs):
+    """(clean?, conflicted files) for merging `theirs` into `ours`."""
+    proc = git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages",
+               ours, theirs, check=False)
+    lines = proc.stdout.strip().splitlines()
+    if proc.returncode == 0:
+        return True, []
+    if proc.returncode == 1:
+        return False, lines[1:]
+    sys.exit(f"git merge-tree {ours} {theirs} failed:\n{proc.stderr.strip()}")
+
+
+def changed_files(repo, base, tip):
+    return set(out(repo, "diff", "--name-only", f"{base}...{tip}").splitlines())
+
+
+def cmd_survey(args):
+    repo = out(args.repo, "rev-parse", "--show-toplevel")
+    excluded = {n for n in args.exclude.split(",") if n}
+    only = {n for n in args.only.split(",") if n}
+    all_wts = worktrees(repo)
+    trunk = all_wts[0]
+    if "branch" not in trunk:
+        sys.exit(f"the trunk worktree {trunk['path']} is not on a branch")
+    trunk_branch = trunk["branch"]
+    sessions = live_sessions()
+
+    wts, skipped = [], []
+    for wt in all_wts:
+        name = os.path.basename(wt["path"])
+        if wt.get("prunable") or wt.get("bare"):
+            skipped.append(f"{wt['path']} (prunable)")
+        elif name in excluded:
+            skipped.append(f"{wt['path']} (excluded)")
+        elif only and wt is not all_wts[0] and name not in only:
+            skipped.append(f"{wt['path']} (not in --only)")
+        else:
+            wts.append(wt)
+
+    print(f"TRUNK  {trunk['path']}  branch {trunk_branch}")
+    upstream = git(repo, "rev-parse", "--abbrev-ref", f"{trunk_branch}@{{upstream}}", check=False)
+    if upstream.returncode == 0:
+        up = upstream.stdout.strip()
+        print(f"  upstream {up} (as of the last fetch): "
+              f"{out(repo, 'rev-list', '--count', f'{up}..{trunk_branch}')} ahead, "
+              f"{out(repo, 'rev-list', '--count', f'{trunk_branch}..{up}')} behind")
+    print()
+
+    print("WORKTREES")
+    candidates = []
+    for wt in wts:
+        path, name = wt["path"], os.path.basename(wt["path"])
+        is_trunk = wt is trunk
+        branch = wt.get("branch", "(detached)")
+        dirty = [l for l in out(path, "status", "--porcelain").splitlines() if l]
+        ahead = int(out(repo, "rev-list", "--count", f"{trunk_branch}..{wt['head']}"))
+        behind = int(out(repo, "rev-list", "--count", f"{wt['head']}..{trunk_branch}"))
+        last = out(repo, "log", "-1", "--format=%h %cd %s", "--date=format:%Y-%m-%d %H:%M", wt["head"])
+        print(f"  {name}{'  (trunk)' if is_trunk else ''}")
+        print(f"    path    {path}")
+        line = f"    branch  {branch}"
+        if not is_trunk and branch != name:
+            home = git(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{name}", check=False)
+            if home.returncode == 0:
+                extra = out(repo, "rev-list", "--count", f"{trunk_branch}..refs/heads/{name}")
+                line += f"   (home branch '{name}' exists, {extra} commits not in {trunk_branch})"
+            else:
+                line += f"   (no home branch '{name}')"
+        print(line)
+        if not is_trunk:
+            print(f"    commits {ahead} ahead of {trunk_branch}, {behind} behind")
+        print(f"    last    {last}")
+        print(f"    dirty   {len(dirty)} files" if dirty else "    clean")
+        for l in dirty[:8]:
+            print(f"      {l}")
+        if len(dirty) > 8:
+            print(f"      ... and {len(dirty) - 8} more")
+        for s in sessions_in(sessions, path):
+            waiting = f" ({s['waitingFor']})" if s.get("waitingFor") else ""
+            print(f"    session {s.get('name', '?')}  status {s.get('status', '?')}{waiting}"
+                  f"  updated {age(s.get('updatedAt', 0) / 1000)}  id {s.get('sessionId', '?')}")
+        if not is_trunk and ahead > 0:
+            candidates.append((name, wt["head"]))
+        print()
+    for s in skipped:
+        print(f"  skipped: {s}")
+    if skipped:
+        print()
+
+    print(f"MERGE PREDICTION into {trunk_branch} (committed work only)")
+    for name, head in candidates:
+        clean, files = merge_prediction(repo, trunk_branch, head)
+        print(f"  {name}: {'clean' if clean else f'CONFLICT in {len(files)} files'}")
+        for f in files[:15]:
+            print(f"      {f}")
+    if not candidates:
+        print("  no worktree has commits ahead of the trunk")
+    print()
+
+    if len(candidates) > 1:
+        # Worktrees often merge each other, so "changed since the trunk" would
+        # count shared commits as overlap. Compare each pair from its own
+        # merge base instead: only what the two did separately.
+        print("PAIRWISE (files both sides changed since they diverged / predicted conflicts)")
+        for i, (a, a_head) in enumerate(candidates):
+            for b, b_head in candidates[i + 1:]:
+                base = out(repo, "merge-base", a_head, b_head)
+                if base in (a_head, b_head):
+                    inner, outer = (a, b) if base == a_head else (b, a)
+                    print(f"  {a} + {b}: {outer} already contains {inner}")
+                    continue
+                overlap = sorted(changed_files(repo, base, a_head) & changed_files(repo, base, b_head))
+                clean, files = merge_prediction(repo, a_head, b_head)
+                verdict = "clean" if clean else f"CONFLICT in {len(files)} files"
+                # Commits both carry that the trunk lacks: merging one brings
+                # that part of the other along.
+                common = int(out(repo, "rev-list", "--count", base, f"^{trunk_branch}"))
+                carried = f", {common} COMMON COMMITS not on {trunk_branch}" if common else ""
+                print(f"  {a} + {b}: {len(overlap)} shared files, {verdict}{carried}")
+                for f in (overlap if clean else files)[:6]:
+                    print(f"      {f}")
+        print()
+
+    # The newest commit that the trunk and every worktree with own commits all
+    # contain: the last moment they were aligned. Worktrees that are only behind
+    # the trunk are left out, or one stale worktree would drag this far back.
+    if candidates:
+        base = out(repo, "merge-base", "--octopus", trunk_branch, *[h for _, h in candidates])
+        print("LAST ALIGNED (newest commit shared by the trunk and all worktrees with own commits)")
+        print(f"  {out(repo, 'log', '-1', '--format=%h %cd %s', '--date=format:%Y-%m-%d %H:%M', base)}")
+        print()
+
+    print("CONSOLIDATION TAGS")
+    tags = out(repo, "tag", "-l", "consolidate-*", "--sort=creatordate",
+               "--format=%(refname:short) %(creatordate:short) %(objectname:short)").splitlines()
+    for t in tags[-6:]:
+        print(f"  {t}")
+    numbers = {"start": set(), "end": set()}
+    for t in tags:
+        parts = t.split()[0].split("-")
+        if len(parts) == 3 and parts[1] in numbers and parts[2].isdigit():
+            numbers[parts[1]].add(int(parts[2]))
+    unfinished = sorted(numbers["start"] - numbers["end"])
+    if unfinished:
+        print(f"  UNFINISHED: consolidate-start-{unfinished[-1]} has no end tag")
+    print(f"  next number: {max(numbers['start'] | numbers['end'], default=0) + 1}")
+
+
+def message_text(entry):
+    """A transcript entry as short text, or None when it carries nothing to read."""
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return content[:TEXT_LIMIT]
+    if not isinstance(content, list):
+        return None
+    parts = []
+    for block in content:
+        kind = block.get("type")
+        if kind == "text":
+            parts.append(block.get("text", "")[:TEXT_LIMIT])
+        elif kind == "tool_use":
+            inp = block.get("input") or {}
+            hint = inp.get("command") or inp.get("file_path") or inp.get("description") or ""
+            parts.append(f"[tool {block.get('name')}: {str(hint)[:TOOL_LIMIT]}]")
+        elif kind == "tool_result":
+            body = block.get("content")
+            if isinstance(body, list):
+                body = " ".join(b.get("text", "") for b in body if isinstance(b, dict))
+            parts.append(f"[result: {str(body or '')[:TOOL_LIMIT]}]")
+    return "\n".join(p for p in parts if p) or None
+
+
+def cmd_tail(args):
+    pdir = project_dir(args.worktree)
+    transcripts = sorted(glob.glob(os.path.join(pdir, "*.jsonl")), key=os.path.getmtime, reverse=True)
+    if not transcripts:
+        print(f"no Claude Code transcripts for {args.worktree} (looked in {pdir})")
+        return
+    live = {s.get("sessionId"): s for s in sessions_in(live_sessions(), args.worktree)}
+    session_id = lambda p: os.path.basename(p)[: -len(".jsonl")]
+    # Live sessions first, then the most recently written ones.
+    transcripts.sort(key=lambda p: session_id(p) not in live)
+    for path in transcripts[: max(args.sessions, len(live))]:
+        sid = session_id(path)
+        s = live.get(sid)
+        state = f"LIVE, status {s.get('status', '?')}, name {s.get('name', '?')}" if s else "not running"
+        print(f"===== session {sid} ({state}; last written {age(os.path.getmtime(path))})")
+        messages = []
+        with open(path) as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("type") not in ("user", "assistant") or entry.get("isSidechain"):
+                    continue
+                text = message_text(entry)
+                if text:
+                    messages.append((entry.get("timestamp", ""), entry["type"], text))
+        for stamp, role, text in messages[-args.n:]:
+            print(f"--- {role} {stamp[:16]}")
+            print(text)
+        print()
+
+
+def records_dir(repo):
+    """The <date>-wtconsolidate folder under the trunk's tmp/, or None before the first run."""
+    found = sorted(glob.glob(os.path.join(repo, "tmp", "*-wtconsolidate")))
+    return found[0] if found else None
+
+
+def cmd_tests(args):
+    repo = worktrees(out(args.repo, "rev-parse", "--show-toplevel"))[0]["path"]
+    folder = records_dir(repo)
+    log = os.path.join(folder, "test-log.jsonl") if folder else None
+    if not log or not os.path.exists(log):
+        print(f"no test log yet (looked for {repo}/tmp/*-wtconsolidate/test-log.jsonl)")
+        return
+    entries = []
+    with open(log) as f:
+        for number, line in enumerate(f, 1):
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    sys.exit(f"{log} line {number} is not valid JSON: {e}")
+    print(f"TEST LOG  {log}  ({len(entries)} entries, newest first; drift is measured to the trunk's HEAD)")
+    print()
+    for e in reversed(entries):
+        commit, paths = e.get("commit", ""), e.get("paths") or []
+        print(f"  [{e.get('result', '?')}] {e.get('theme', '?')} — {e.get('what', '')}")
+        print(f"    {e.get('kind', '?')}, {e.get('at', '?')[:16]}, consolidation {e.get('consolidation', '?')}, "
+              f"at {commit[:8] or '?'}")
+        if git(repo, "cat-file", "-e", f"{commit}^{{commit}}", check=False).returncode != 0:
+            print("    drift   unknown: the commit is not in this repository")
+        else:
+            if git(repo, "merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode != 0:
+                print("    note    tested on a commit that is not part of the trunk's history")
+            if not paths:
+                print("    drift   unknown: the entry names no paths")
+            else:
+                commits = out(repo, "rev-list", "--count", f"{commit}..HEAD", "--", *paths)
+                files = out(repo, "diff", "--name-only", commit, "HEAD", "--", *paths).splitlines()
+                if files:
+                    print(f"    drift   {commits} commits changed {len(files)} files in its paths since")
+                    for f in files[:5]:
+                        print(f"      {f}")
+                else:
+                    print("    drift   none: its paths are unchanged since")
+        if e.get("notes"):
+            print(f"    notes   {e['notes']}")
+        print()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    survey = sub.add_parser("survey")
+    survey.add_argument("--repo", default=".")
+    survey.add_argument("--exclude", default="")
+    survey.add_argument("--only", default="")
+    survey.set_defaults(func=cmd_survey)
+    tail = sub.add_parser("tail")
+    tail.add_argument("worktree")
+    tail.add_argument("-n", type=int, default=40)
+    tail.add_argument("--sessions", type=int, default=2)
+    tail.set_defaults(func=cmd_tail)
+    tests = sub.add_parser("tests")
+    tests.add_argument("--repo", default=".")
+    tests.set_defaults(func=cmd_tests)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

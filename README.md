@@ -11,6 +11,7 @@ matching permissions to `~/.claude/settings.json`.
 | `checkscreenshot` | Pull the latest screenshots from ~/Desktop into context |
 | `daylog` | Reconstruct what I was doing on a given day or week |
 | `advreview` | Adversarial review by Codex (newest astra model) of the current code changes or plan |
+| `wtconsolidate` | Merge finished work from a repo's parallel worktrees into main, then write a test plan (linked into bboo only) |
 
 `daylog` combines Google Calendar and sent mail (via `gog`), git commits across
 my repos, GitHub activity, and my Bear WPlan/DPlan notes. Repos and accounts are
@@ -22,6 +23,12 @@ or reviews a plan document. Codex needs `~/.codex`. A session in a sandbox that 
 read it sends the request to `skills/advreview/bin/advreview-listen`, which
 `tools/dev-services` starts outside the sandbox. The rules for when Claude runs it
 without being asked are in `~/.claude/CLAUDE.md`.
+
+`wtconsolidate` is not installed globally. `install.sh` links it into
+`~/q/bboo/main/.claude/skills`, so it is run from a session in that worktree. Its
+read-only helper, `skills/wtconsolidate/bin/wtsurvey`, reports each worktree's state,
+its Claude Code sessions and the predicted merge conflicts. To use the skill in
+another repo, link it there the same way and see "Other repositories" in its SKILL.md.
 
 `global/CLAUDE.md` is my global instructions file. `install.sh` links it to
 `~/.claude/CLAUDE.md`.
