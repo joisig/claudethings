@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Runs OUTSIDE the sandbox. Serves review requests from bin/advreview, which a
+# sandboxed session uses when it cannot reach Codex itself (~/.codex is not readable
+# there).
+#
+# A request is a file in ~/.local/run/advreview/requests with three lines: mode,
+# directory, argument. It is never executed: `advreview _run` checks it and builds the
+# codex command line itself. The review goes to results/<id>.out and the exit status
+# to results/<id>.done.
+#
+# Usage: advreview-listen   (claudethings/tools/dev-services starts it)
+
+SPOOL="${ADVREVIEW_SPOOL:-$HOME/.local/run/advreview}"
+RUNNER="$HOME/.claude/skills/advreview/bin/advreview"
+
+mkdir -p "$SPOOL/requests" "$SPOOL/results"
+echo "advreview: listening on $SPOOL/requests"
+
+serve() {
+  local job="$1" id mode dir arg status
+  id="$(basename "$job" .job)"
+  { IFS= read -r mode; IFS= read -r dir; IFS= read -r arg; } < "$job"
+  rm -f "$job"
+
+  echo "advreview: $id: $mode ${arg:+$arg }in $dir"
+  "$RUNNER" _run "$mode" "$dir" "$arg" > "$SPOOL/results/$id.out" 2>&1
+  status=$?
+  echo "$status" > "$SPOOL/results/$id.done"
+  echo "advreview: $id: finished with status $status"
+}
+
+while true; do
+  touch "$SPOOL/alive"
+  for req in "$SPOOL"/requests/*.req; do
+    [ -f "$req" ] || continue
+    # Renamed before it is served, so the next pass does not start it a second time.
+    job="${req%.req}.job"
+    mv "$req" "$job" 2>/dev/null || continue
+    serve "$job" &
+  done
+  # Results older than a day are no longer needed.
+  find "$SPOOL/results" -type f -mtime +1 -delete 2>/dev/null
+  sleep 1
+done

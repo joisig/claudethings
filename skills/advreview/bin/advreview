@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# advreview - ask Codex for an adversarial review, with the newest "astra" model.
+#
+#   advreview uncommitted          review staged, unstaged and untracked changes
+#   advreview base <branch>        review the current branch against <branch>
+#   advreview plan <file>          review a plan / design document
+#
+# Runs in the current directory (a git repository for the code modes). The review is
+# printed on stdout.
+#
+# Codex needs ~/.codex. When this shell can read it, Codex runs right here. When it
+# cannot (the "safehouse" sandbox), the request goes to advreview-listen, which runs
+# outside the sandbox (started by claudethings/tools/dev-services), and this script
+# waits for the result.
+#
+# The listener never runs a command it is given. A request names a mode, a directory
+# and one argument; `advreview _run` builds the codex command line from those.
+#
+# ADVREVIEW_MODEL=<slug> skips the model lookup. It is read where Codex runs: in this
+# shell for a direct run, in the listener's environment otherwise.
+
+set -u
+
+SPOOL="${ADVREVIEW_SPOOL:-$HOME/.local/run/advreview}"
+WAIT_SECONDS="${ADVREVIEW_WAIT_SECONDS:-2700}"
+START_HINT="Start it outside the sandbox: ~/.claude/skills/advreview/bin/advreview-listen (claudethings/tools/dev-services starts it too)."
+
+PLAN_PROMPT='Do an adversarial review of the plan document at the path below. Check its claims against the code in this repository. Report concrete problems: wrong assumptions, missing cases, risks, steps that will not work as written, and places where a simpler approach would do. Do not change any files. Plan document: '
+
+die() { echo "advreview: $*" >&2; exit 2; }
+
+usage() {
+  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+# Checks a request. Used on both sides, so the listener checks what it is about to run.
+validate() {
+  local mode="$1" dir="$2" arg="$3"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  case "$mode" in
+    uncommitted)
+      [ -z "$arg" ] || die "uncommitted takes no argument" ;;
+    base)
+      [[ "$arg" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "not a branch name: '$arg'" ;;
+    plan)
+      [ -f "$arg" ] || die "no such plan file: '$arg'" ;;
+    *)
+      die "unknown mode: '$mode'" ;;
+  esac
+}
+
+# Newest model whose slug contains "astra", from Codex's own catalog.
+pick_model() {
+  if [ -n "${ADVREVIEW_MODEL:-}" ]; then echo "$ADVREVIEW_MODEL"; return 0; fi
+
+  codex debug models 2>/dev/null | python3 -c '
+import json, re, sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    sys.exit("advreview: could not read the Codex model catalog: %s" % e)
+
+slugs = []
+
+def walk(node):
+    if isinstance(node, dict):
+        for key in ("slug", "id", "model", "name"):
+            value = node.get(key)
+            if isinstance(value, str) and value and " " not in value:
+                if value not in slugs:
+                    slugs.append(value)
+                break
+        for value in node.values():
+            walk(value)
+    elif isinstance(node, list):
+        for value in node:
+            walk(value)
+
+walk(data)
+astra = [s for s in slugs if "astra" in s.lower()]
+if not astra:
+    sys.exit("advreview: no astra model in the Codex catalog. Models: " + ", ".join(slugs))
+
+# Highest version number wins; among equals the shortest slug (the plain model, not a variant).
+def rank(slug):
+    return (tuple(int(n) for n in re.findall(r"\d+", slug)), -len(slug))
+
+print(max(astra, key=rank))
+'
+}
+
+# Runs Codex. Only ever called with a request that passed validate.
+run() {
+  local mode="$1" dir="$2" arg="$3" model
+  validate "$mode" "$dir" "$arg"
+  cd "$dir" || die "cannot enter $dir"
+  model="$(pick_model)" || exit 2
+  [ -n "$model" ] || die "no model chosen"
+  echo "advreview: model $model, mode $mode${arg:+ $arg}" >&2
+
+  # Codex prints its whole working transcript (hundreds of kB). Only its last message,
+  # the review itself, goes to stdout; the transcript is kept in a log file.
+  local work final log status
+  work="$(mktemp -d "${TMPDIR:-/tmp}/advreview.XXXXXX")" || die "cannot create a temp dir"
+  final="$work/review.md"
+  log="$work/transcript.log"
+
+  case "$mode" in
+    uncommitted) codex exec review -m "$model" --uncommitted -o "$final" > "$log" 2>&1 ;;
+    base)        codex exec review -m "$model" --base "$arg" -o "$final" > "$log" 2>&1 ;;
+    plan)        codex exec -m "$model" -s read-only -o "$final" "$PLAN_PROMPT$arg" > "$log" 2>&1 ;;
+  esac
+  status=$?
+
+  if [ "$status" -eq 0 ] && [ -s "$final" ]; then
+    cat "$final"
+    echo
+    echo "advreview: full transcript: $log" >&2
+  else
+    echo "advreview: codex ended with status $status and no review. Last lines of $log:" >&2
+    tail -n 40 "$log" >&2
+    [ "$status" -ne 0 ] || status=1
+  fi
+  return "$status"
+}
+
+# Hands the request to the listener outside the sandbox and waits for the result.
+via_listener() {
+  local mode="$1" dir="$2" arg="$3" id req out finished age waited=0
+  local alive="$SPOOL/alive"
+
+  [ -f "$alive" ] || die "Codex is not reachable from this shell and advreview-listen is not running. $START_HINT"
+  # perl, not stat: the stat on PATH can be BSD or GNU, and their flags differ.
+  age="$(perl -e 'print time - (stat shift)[9]' "$alive")"
+  [ "$age" -le 15 ] || die "advreview-listen is not running (last seen ${age}s ago). $START_HINT"
+
+  id="$(date +%Y%m%d-%H%M%S)-$$-$RANDOM"
+  req="$SPOOL/requests/$id.req"
+  out="$SPOOL/results/$id.out"
+  finished="$SPOOL/results/$id.done"
+
+  # Written under another name first, so the listener never reads half a request.
+  printf '%s\n%s\n%s\n' "$mode" "$dir" "$arg" > "$req.tmp" && mv "$req.tmp" "$req"
+
+  while [ ! -f "$finished" ]; do
+    sleep 2
+    waited=$((waited + 2))
+    [ "$waited" -lt "$WAIT_SECONDS" ] || die "no result after ${WAIT_SECONDS}s (request $id)"
+  done
+
+  cat "$out"
+  exit "$(cat "$finished")"
+}
+
+[ $# -ge 1 ] || usage
+mode="$1"
+
+if [ "$mode" = "_run" ]; then
+  [ $# -eq 4 ] || die "_run takes mode, directory, argument"
+  run "$2" "$3" "$4"
+  exit $?
+fi
+
+arg="${2:-}"
+if [ "$mode" = "plan" ] && [ -n "$arg" ]; then
+  arg="$(cd "$(dirname "$arg")" 2>/dev/null && pwd)/$(basename "$arg")"
+fi
+validate "$mode" "$PWD" "$arg"
+
+if [ -z "${ADVREVIEW_FORCE_LISTENER:-}" ] && { [ -r "$HOME/.codex/config.toml" ] || [ -r "$HOME/.codex/auth.json" ]; }; then
+  run "$mode" "$PWD" "$arg"
+else
+  via_listener "$mode" "$PWD" "$arg"
+fi

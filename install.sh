@@ -7,6 +7,7 @@
 # - clipboard-markdown: Copy markdown to clipboard as plain text
 # - clipboard-richtext: Copy markdown to clipboard as rich text (for Google Docs)
 # - daylog: Reconstruct what I was doing on a given day or week
+# - advreview: Adversarial review by Codex of the current code changes or plan
 #
 
 set -e
@@ -39,9 +40,10 @@ for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot sh
     echo "  $skill -> $skill_dir/SKILL.md"
 done
 
-# daylog ships more than a SKILL.md (config.sh, bin/, reference/), so the whole
-# directory is linked rather than the single file.
-for skill in daylog; do
+# daylog and advreview ship more than a SKILL.md (bin/, and for daylog config.sh and
+# reference/), so the whole directory is linked rather than the single file.
+chmod +x "$SCRIPT_DIR/skills/advreview/bin/advreview-listen"
+for skill in daylog advreview; do
     chmod +x "$SCRIPT_DIR/skills/$skill/bin/$skill"
     skill_dir="$CLAUDE_DIR/skills/$skill"
     [ -L "$skill_dir" ] && rm -f "$skill_dir"
@@ -52,6 +54,15 @@ for skill in daylog; do
         echo "  $skill -> $skill_dir"
     fi
 done
+
+# The global instructions file (~/.claude/CLAUDE.md) is kept in this repo and linked.
+global_md="$CLAUDE_DIR/CLAUDE.md"
+if [ -e "$global_md" ] && [ ! -L "$global_md" ]; then
+    mv "$global_md" "$global_md.bak"
+    echo "  Backed up the existing CLAUDE.md to CLAUDE.md.bak"
+fi
+ln -sfn "$SCRIPT_DIR/global/CLAUDE.md" "$global_md"
+echo "  CLAUDE.md -> $global_md"
 
 # ---------------------------------------------------------------------------
 # 3. Backup and update settings.json with permissions
@@ -71,6 +82,7 @@ settings_file = os.path.expanduser("~/.claude/settings.json")
 tools_dir = os.path.expanduser("~/p/claudethings/tools")
 bear_reader = os.path.expanduser("~/p/claudethings/bear_reader.py")
 daylog = os.path.expanduser("~/.claude/skills/daylog/bin/daylog")
+advreview = os.path.expanduser("~/.claude/skills/advreview/bin/advreview")
 
 # Permissions to add
 new_permissions = [
@@ -94,6 +106,9 @@ new_permissions = [
     # daylog (invoked through the ~/.claude symlink, as SKILL.md documents)
     f"Bash({daylog}:*)",
     "Skill(daylog)",
+    # advreview (same: invoked through the ~/.claude symlink)
+    f"Bash({advreview}:*)",
+    "Skill(advreview)",
     # shared temp file
     "Write(/tmp/clipboard_content.md)",
 ]
@@ -144,6 +159,7 @@ echo "  - bear-notes:          Read and search Bear notes"
 echo "  - clipboard-markdown:  Copy markdown to clipboard as plain text"
 echo "  - clipboard-richtext:  Copy markdown to clipboard as rich text"
 echo "  - daylog:              Reconstruct a past working day or week"
+echo "  - advreview:           Adversarial review by Codex (code changes or a plan)"
 echo ""
 echo "Tools:"
 echo "  - $SCRIPT_DIR/bear_reader.py"
