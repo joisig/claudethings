@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+mkdir -p /tmp/screenshots-for-claude
+
+exec safehouse \
+  --enable=electron,clipboard \
+  --add-dirs-ro="$HOME/p:$HOME/q:$HOME/c:$HOME/snilli:$HOME/w/protos:/tmp/screenshots-for-claude:$HOME/Desktop:$HOME/.cache/puppeteer:$QA_INVOICES" \
+  --add-dirs="$HOME/.local/run:$HOME/q/bboo:$HOME/snilli/k/kloi:$HOME/w/protos" \
+  claude --effort high --dangerously-skip-permissions "$@"
