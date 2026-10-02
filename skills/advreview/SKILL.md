@@ -41,7 +41,7 @@ The tool finds the model itself: the newest one in Codex's catalog whose name co
 4. **Anything else** (a design document, other prose): `plan <file>` on that file.
 
 If nothing has changed since the last review of the same thing, say so and do not run
-it again.
+it again. (A repeat inside the loop of Step 4 follows a fix, so something has changed.)
 
 ## Step 2 — give the reviewer no context
 
@@ -70,8 +70,32 @@ the reviewer lacks our context and can be wrong. Then, for each point:
 Use `AskUserQuestion` for the questions and tradeoffs. Group them in one call when
 you can.
 
-After that, tell the user briefly: what the reviewer found, what you changed, what
-you did not change and why. For a plan, update the plan file before you show it.
+## Step 4 — code reviews repeat until clean
+
+This step is for code reviews (`uncommitted` and `base`). A plan review runs once.
+
+After you fixed something, run the review again on the new state. On a feature
+branch, commit the fixes first. Each run is context free like the first one: the tool
+sends the same request, and the reviewer is not told that there was an earlier review
+or what it found.
+
+Stop when a review is clean. A review is also clean when every item in it is one of
+these:
+
+- wrong (the reviewer lacks context, or is simply mistaken);
+- about a tradeoff or decision that is already made, by the user or with the user.
+
+Run at most 4 reviews. If the fourth is still not clean, stop. Tell the user what is
+still open and what kept coming back, and decide together what to do.
+
+Questions and tradeoffs for the user (Step 3) pause the loop. Continue after the
+answer if it led to a code change.
+
+## Step 5 — report
+
+Tell the user briefly: how many reviews ran, what the reviewer found, what you
+changed, what you did not change and why. For a plan, update the plan file before you
+show it.
 
 ## When it cannot run
 
