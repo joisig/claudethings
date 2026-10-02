@@ -87,8 +87,10 @@ advreview = os.path.expanduser("~/.claude/skills/advreview/bin/advreview")
 # Permissions to add
 new_permissions = [
     # bear-notes
+    # NB: Edit(path) rules cover every file-editing tool, Write included. A
+    # Write(path) rule is not matched by file permission checks at all, and
+    # Claude Code warns about it on every startup. Always use Edit(path) here.
     "Read(/tmp/bearnotes/**)",
-    "Write(/tmp/bearnotes/**)",
     "Edit(/tmp/bearnotes/**)",
     "Bash(mkdir -p /tmp/bearnotes)",
     f"Bash(python {bear_reader}:*)",
@@ -110,7 +112,7 @@ new_permissions = [
     f"Bash({advreview}:*)",
     "Skill(advreview)",
     # shared temp file
-    "Write(/tmp/clipboard_content.md)",
+    "Edit(/tmp/clipboard_content.md)",
 ]
 
 # Read existing settings

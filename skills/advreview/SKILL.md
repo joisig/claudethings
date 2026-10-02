@@ -85,7 +85,7 @@ these:
 - wrong (the reviewer lacks context, or is simply mistaken);
 - about a tradeoff or decision that is already made, by the user or with the user.
 
-Run at most 4 reviews. If the fourth is still not clean, stop. Tell the user what is
+Run at most 5 reviews. If the fifth is still not clean, stop. Tell the user what is
 still open and what kept coming back, and decide together what to do.
 
 Questions and tradeoffs for the user (Step 3) pause the loop. Continue after the
