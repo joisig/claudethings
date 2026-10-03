@@ -18,9 +18,16 @@ replace elsewhere.
 | Trunk | `~/q/bboo/main`, branch `main` |
 | Worktrees | `secondary`, `tertiary`, `quaternary`, `quinary`, `senary`, `septary`, each in `~/q/bboo/<name>` with a home branch of the same name |
 | Never touched | `BRelDemo`, `BRelProd` (release worktrees), scratch worktrees |
-| Tests | `mix test` after a merge, `mix precommit` at the end |
+| Tests | `MIX_TEST_PARTITION=_main mix test` after a merge, `MIX_TEST_PARTITION=_main mix precommit` at the end |
+| Test database | Always the trunk's private one (`MIX_TEST_PARTITION=_main` → `bboo_test_main`). The shared `bboo_test` carries columns from other worktrees' unmerged migrations, and that makes schema-checking tests fail for reasons outside the consolidation |
+| Commits on the trunk | `main` is a protected branch: every commit you make on it (a collision fix, a `mix precommit` change) needs the user's OK. Show the diff and the commit message first |
+| Fetch | `git fetch` over SSH can fail in Claude's shell (no key). Then ask the user to run `! git -C ~/q/bboo/main fetch origin` |
+| Known collision | Every new column or table needs an entry in `lib/bboo/readonly_grants/spec.ex`, or `Bboo.ReadonlyGrantsTest` fails. A branch that adds a migration meets this as soon as it merges with a trunk that has the spec |
+| Browser QA | Dev server on port 4001, started from the trunk with `./devprod.sh`. The QA user (`joi@quarter.is`) is only a viewer on account 16, so admin-only UI is checked on an account where the user is owner (92, 93) |
 
-Run the skill from a session in the trunk worktree.
+Run the skill from a session in the trunk worktree. To consolidate into another
+worktree instead (for example when main is busy or carries unfinished work), see
+"Consolidating into another worktree" near the end.
 
 ## Rules for the whole run
 
@@ -30,6 +37,8 @@ Run the skill from a session in the trunk worktree.
 - **Other sessions' work is theirs.** Do not commit, stash, discard or edit
   uncommitted changes in another worktree unless the user says so for that worktree.
 - **Do not delete branches.** Do not push, and do not push tags, before Step 9.
+- **Commits on a protected trunk** need the user's OK, one by one (see the setup
+  table). The user can give that OK in advance at Step 3 for small collision fixes.
 - **No force.** No `reset --hard`, `checkout -f` or `--no-verify` on anything
   except undoing a merge you just made yourself on the trunk, and that only after
   the user agreed.
@@ -127,7 +136,8 @@ line for a theme and `what` is the current state.
 
 ## Step 1 — survey
 
-1. Run `git -C ~/q/bboo/main fetch origin`. If the trunk is behind its upstream,
+1. Run `git -C ~/q/bboo/main fetch origin`. If it fails, ask the user to run it
+   (see the setup table) and compare again. If the trunk is behind its upstream,
    stop and ask the user: merging on top of a stale trunk makes the push harder.
 2. Run `wtsurvey survey`. Call `ListAgents` too: it is the authority on which
    sessions are live, and it gives the names you need for Step 7.
@@ -138,8 +148,24 @@ line for a theme and `what` is the current state.
    user whether to continue it or to start a new one.
 4. The trunk must be clean and on its branch. If it is dirty, or another live
    session in the trunk is `busy`, stop and ask.
+5. **Baseline test of the trunk.** Start the trunk's test run in the background
+   now (`MIX_TEST_PARTITION=_main mix test`); it runs while Step 2 runs. A red
+   trunk is reported in Step 3, and the user decides whether to go on. Without
+   this baseline, a failure after the first merge cannot be blamed on the merge
+   or on the trunk.
 
 ## Step 2 — where does each worktree stand?
+
+**The trunk's own work takes part too.** Work is often committed straight to the
+trunk between two consolidations. List it: `git log --first-parent --no-merges
+--oneline <summary base>..main`, where the summary base is `consolidate-end-(N-1)`,
+or the survey's **last aligned** commit on the first run. When that list is not
+empty, give the trunk a sub-agent of its own, with the same instructions as below
+(its sessions are the other sessions in the trunk; leave out your own). That work
+is on the trunk already, so it cannot be left out. Its verdict decides something
+else: "in progress" or "unclear" goes to **Ask** in Step 3, with the options to go
+on and mark those themes as unfinished in the plan, to stop, or to consolidate
+into another worktree instead (see "Consolidating into another worktree").
 
 For each worktree that has commits ahead of the trunk or dirty files, start one
 sub-agent. Start them all in one message so that they run in parallel. Give each:
@@ -182,9 +208,10 @@ trunk in Step 6.
 
 ## Step 3 — ask the user
 
-Show one table: worktree, branch, group, and the one-line reason. Then ask about
+Show one table: worktree, branch, group, and the one-line reason. Include a row
+for the trunk's own work and one for the baseline test result. Then ask about
 the **Ask** group with `AskUserQuestion`, one question per worktree, grouped in as
-few calls as possible. Typical options: consolidate it; do not consolidate it (it still receives main in
+few calls as possible. A red baseline is one more question: go on, or stop. Typical options: consolidate it; do not consolidate it (it still receives main in
 Step 6 if it is clean); do not touch it at all; commit the
 dirty files first and then consolidate (name the files); consolidate the committed
 part and leave the dirty files where they are.
@@ -247,14 +274,16 @@ For each branch, in that order:
      unique and must sort after the migrations the trunk had already. If one sorts
      earlier than a migration that already ran on the dev database, say so in the
      report; do not rename it without asking.
-5. **Tests:** `mix test` in the trunk. Run it in the background and wait for the
-   notification.
+5. **Tests:** `MIX_TEST_PARTITION=_main mix test` in the trunk. Run it in the
+   background with the tool's own background option, not a shell `&`, and wait for
+   the notification.
 6. **A failure:** work out from the failure and the two diffs whether the
    combination caused it or the branch brought it. Do not check out a parent to
    run the tests there: `mix test` migrates the shared test database, so an older
    commit would run against a newer schema and prove nothing. Fix what the
    combination broke, in a separate commit on the trunk that says which two pieces
-   of work collided. If the fix is not small, or the branch itself is broken, stop
+   of work collided (on a protected trunk, after the user's OK). Check the known
+   collisions in the setup table first. If the fix is not small, or the branch itself is broken, stop
    and ask: fix here, or undo this merge (back to the HEAD noted in point 2) and
    move the worktree to **Leave**. If the undone merge added migrations, tell the
    user that the test database is now ahead of the code and needs a reset; do not
@@ -264,7 +293,7 @@ For each branch, in that order:
 
 Do not start the next merge while the tests of the previous one are red.
 
-**After the last merge**, run `mix precommit` in the trunk. This is the full check
+**After the last merge**, run `MIX_TEST_PARTITION=_main mix precommit` in the trunk. This is the full check
 of the end state. It can change files (it unlocks unused dependencies): if the
 tree is dirty afterwards, show the change, commit it on the trunk, and run it
 again. Go on only when it is green and the tree is clean. Keep the output in
@@ -272,8 +301,11 @@ again. Go on only when it is green and the tree is clean. Keep the output in
 
 ## Step 6 — bring the worktrees in line
 
-Check each worktree again right before you change it (tip, clean tree, no `busy`
-session), as in Step 5. A worktree the user said not to touch is skipped.
+Call `ListAgents` again first: new sessions start while the merges run. Check
+each worktree again right before you change it (tip, clean tree, no `busy`
+session), as in Step 5. A worktree the user said not to touch is skipped. A
+consolidated worktree whose session is busy now is left on its branch: its work
+is on the trunk already, and only the switch back to the home branch waits.
 
 **Consolidated worktrees** end on their home branch, equal to the trunk:
 
@@ -337,7 +369,8 @@ conflict). Then one line that says which files.
    `automated` line per theme, with the HEAD it ran on. Append one
    `manual-before-merge` line to `test-log.jsonl` for each theme the user says
    was tested, with the branch tip from the start tag as `commit`, and what was
-   and was not covered in `notes`.
+   and was not covered in `notes`. For the trunk's own work, `commit` is the
+   trunk commit it was tested on, or `null` when the user does not say.
 
 ## Step 9 — the consolidation test plan
 
@@ -386,8 +419,13 @@ Work out everything that can be tested without the user, tell the user the list,
 and start it while they read the plan:
 
 - **Free, start at once, in the background:** `bboo-browser-qa` flows for the new
-  themes that meet that skill's conditions and spend nothing: they only read and
-  click through existing data. (`mix precommit` already ran in Step 5.)
+  themes, including the trunk's own work, that meet that skill's conditions and
+  spend nothing: they only read and click through existing data. (`mix precommit`
+  already ran in Step 5.) The dev server must run the trunk's code. When the range
+  changes `lib/bboo/application.ex` or `config/`, a server started before the
+  merges does not have the change; ask the user to restart `./devprod.sh` first.
+  Do not restart it yourself. Run the flows in a background sub-agent, so that
+  the screenshots stay out of your context.
 - **Costs API money, ask first:** browser flows that upload or ingest a document,
   digitize, or make the agent run; the `expensiveintegration` tests and the
   reliability run from `TEST_PLAN_GUIDELINES.md`, for the themes that touch what
@@ -456,6 +494,36 @@ changed in the release before you reduce the testing of an area.
 A `manual-before-merge` pass is weaker than a `manual` one: it says nothing about
 the combination with the other work.
 
+## Consolidating into another worktree
+
+Sometimes the trunk is busy or carries unfinished work, and the user asks to
+consolidate into another worktree, for example `secondary`. The flow is the same,
+with that worktree as the target in place of the trunk. What changes:
+
+- **Run from the target worktree**, and check it like the trunk in Step 1: clean,
+  on its home branch, no other live session `busy` in it.
+- **`wtsurvey` always measures against the first worktree (`main`).** Use its
+  sessions, dirt and pairwise predictions as they are, but compute the merge
+  predictions against the target yourself: `git merge-tree --write-tree --name-only
+  <target> <branch>`, and `git log --oneline <target>..<branch>` for what each
+  branch brings.
+- **The target's home branch is not protected** (unless it is `main`), so collision
+  fixes are committed without asking. Say each one in the report.
+- **Tests** use the target's private database: `MIX_TEST_PARTITION=_<target>`.
+- **No migrations.** In bboo they run only from `main`. In Step 8, list the
+  migrations the consolidation brings and say that they run when the target
+  reaches `main`.
+- **Tags and records** keep the same names and the same folder in the trunk's
+  `tmp/` (the numbering is shared). Write `target <worktree> <branch> <sha>` in
+  the start tag's message in place of the `trunk` line, and the target in the
+  header of `summary.md` and of the plan.
+- **Step 6:** consolidated worktrees end on their home branch, equal to the
+  target. The trunk itself is a worktree that was left out: it receives nothing.
+- **Browser QA** needs the dev server to run the target's code, and the dev
+  server normally runs from `main`. Ask the user before Step 10.
+- **Bringing it to `main` later** is a normal consolidation that has the target
+  in its **Consolidate** group.
+
 ## Other repositories
 
 The flow is the same; replace the setup facts. Find them in the repository's
@@ -470,3 +538,7 @@ CLAUDE.md and the project memory before you start, and ask for what is missing.
 | Whether and where migrations run | Step 8 |
 | Which automated runs cost money | Step 10 |
 | Rules for pushing (protos pushes through a pre-push hook and pull requests) | the push question in Step 10 |
+| Whether the trunk is protected (commits on it need the user's OK) | Steps 5 and 6 |
+| How to keep the tests off a shared test database, if there is one | Steps 1, 5 and 10 |
+| Collisions that this repository is known for | Step 5, point 6 |
+| How the dev server is started, and for which user, for browser QA | Step 10 |
