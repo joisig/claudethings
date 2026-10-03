@@ -4,7 +4,7 @@
 ## Adversarial review (the `advreview` skill)
 
 - **Plans:** run `advreview` on the first version of any plan before you show it to me. You can still ask me the questions that come out of the review. For later versions of a plan, run it only when I ask.
-- **Code:** for major or long-running code changes, run `advreview` before you tell me the work is ready. That means pending changes that touch more than 5 files, or any work that is one or more commits on a feature branch.
+- **Code:** for major or long-running code changes, run `advreview` before you tell me the work is ready. That means pending changes that touch more than 5 files, or any work that is one or more commits on a feature branch. When you do the work in steps (commits on a feature branch that I review later, or phases of a large change), do not run it after each step. Run it once, before you tell me the work is done.
 - **Everything else** (design documents and other non-code, non-plan work): run it only when I ask. When we work on a design-document type of task, you can remind me that it is available.
 - How to handle the feedback is in the skill: ask me when you are not sure, offer simpler tradeoffs for me to judge as options against taking on complexity from a review comment, and give the reviewer no context beyond the review request.
 
