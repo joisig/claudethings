@@ -1,0 +1,199 @@
+/* visualexplain canvas shell. Linked by every generated page; see SKILL.md. */
+
+:root {
+  color-scheme: light dark;
+  --ve-bg: #f1f1ee;
+  --ve-frame-bg: #ffffff;
+  --ve-fg: #1c1c1a;
+  --ve-muted: #6b6b66;
+  --ve-line: #c9c9c2;
+
+  /* Status colours: a stroke/text colour and a fill for each. */
+  --ve-existing: #77776f;
+  --ve-existing-fill: #ededea;
+  --ve-added: #1a7f37;
+  --ve-added-fill: #dafbe1;
+  --ve-removed: #cf222e;
+  --ve-removed-fill: #ffebe9;
+  --ve-changed: #9a6700;
+  --ve-changed-fill: #fff8c5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ve-bg: #161614;
+    --ve-frame-bg: #222220;
+    --ve-fg: #e8e8e3;
+    --ve-muted: #9c9c94;
+    --ve-line: #45453f;
+
+    --ve-existing: #9c9c94;
+    --ve-existing-fill: #33332f;
+    --ve-added: #4ac26b;
+    --ve-added-fill: #12361f;
+    --ve-removed: #ff7b72;
+    --ve-removed-fill: #4a1a1c;
+    --ve-changed: #d4a72c;
+    --ve-changed-fill: #3d2f00;
+  }
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--ve-bg);
+  color: var(--ve-fg);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.ve-dragging { cursor: grabbing; }
+
+/* The world: a normal grid that canvas.js moves and scales as one piece. Frames are
+   placed automatically in DOM order, so two frames cannot share a cell. */
+#ve-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  display: grid;
+  grid-template-columns: repeat(var(--ve-cols, 3), max-content);
+  gap: 56px;
+  align-items: start;
+  width: max-content;
+  counter-reset: ve-frame;
+}
+
+#ve-world > h1,
+#ve-world > .ve-lede {
+  grid-column: 1 / -1;
+  margin: 0;
+  contain: inline-size;  /* a long title must not widen the columns */
+}
+
+#ve-world > h1 { font-size: 30px; font-weight: 650; }
+#ve-world > .ve-lede { color: var(--ve-muted); max-width: 90ch; margin-top: -40px; }
+
+.ve-frame {
+  counter-increment: ve-frame;
+  box-sizing: border-box;
+  min-width: 320px;
+  padding: 20px 24px 24px;
+  background: var(--ve-frame-bg);
+  border: 1px solid var(--ve-line);
+  border-radius: 10px;
+  cursor: default;
+}
+
+.ve-frame.ve-wide { grid-column: span 2; }
+
+.ve-frame > h2 {
+  margin: 0 0 2px;
+  font-size: 19px;
+  font-weight: 650;
+  cursor: zoom-in;
+}
+
+/* The number is the key that zooms to the frame. */
+.ve-frame > h2::before {
+  content: counter(ve-frame);
+  display: inline-block;
+  min-width: 1.5em;
+  margin-right: 8px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--ve-line);
+  border-radius: 5px;
+  color: var(--ve-muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  vertical-align: 2px;
+}
+
+.ve-src { margin: 0 0 14px; color: var(--ve-muted); font-size: 13px; }
+
+.ve-frame p { max-width: 70ch; }
+.ve-frame code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.ve-frame button {
+  font: inherit;
+  padding: 3px 12px;
+  color: var(--ve-fg);
+  background: var(--ve-existing-fill);
+  border: 1px solid var(--ve-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ve-frame button[aria-pressed="true"] { border-color: var(--ve-fg); }
+
+/* Freehand SVG. canvas.js gives an svg its viewBox size when it has no width. */
+.ve-frame svg { display: block; font: inherit; overflow: visible; }
+.ve-frame svg text { fill: var(--ve-fg); stroke: none; }
+.ve-frame svg .ve-label { fill: var(--ve-muted); font-size: 13px; }
+.ve-frame svg .ve-arrow { fill: none; stroke: var(--ve-muted); stroke-width: 1.5; }
+
+/* A shape with no status: a plan step, a gate, the outline of a UI sketch. */
+svg .ve-box { stroke: var(--ve-muted); fill: var(--ve-frame-bg); stroke-width: 1.5; }
+:not(svg *).ve-box { border: 1.5px solid var(--ve-muted); background: var(--ve-frame-bg); }
+
+/* Status classes. On SVG shapes they set stroke and fill; on connectors only the
+   stroke; on text only the fill; on HTML the border and background. */
+svg .ve-existing { stroke: var(--ve-existing); fill: var(--ve-existing-fill); stroke-width: 1.5; }
+svg .ve-added    { stroke: var(--ve-added);    fill: var(--ve-added-fill);    stroke-width: 2; }
+svg .ve-removed  { stroke: var(--ve-removed);  fill: var(--ve-removed-fill);  stroke-width: 2; stroke-dasharray: 6 4; }
+svg .ve-changed  { stroke: var(--ve-changed);  fill: var(--ve-changed-fill);  stroke-width: 2; }
+
+svg path.ve-existing, svg line.ve-existing, svg polyline.ve-existing,
+svg path.ve-added,    svg line.ve-added,    svg polyline.ve-added,
+svg path.ve-removed,  svg line.ve-removed,  svg polyline.ve-removed,
+svg path.ve-changed,  svg line.ve-changed,  svg polyline.ve-changed { fill: none; }
+
+.ve-frame svg text.ve-existing { fill: var(--ve-existing); stroke: none; }
+.ve-frame svg text.ve-added    { fill: var(--ve-added);    stroke: none; }
+.ve-frame svg text.ve-removed  { fill: var(--ve-removed);  stroke: none; text-decoration: line-through; }
+.ve-frame svg text.ve-changed  { fill: var(--ve-changed);  stroke: none; }
+
+:not(svg *).ve-existing { border: 1.5px solid var(--ve-existing); background: var(--ve-existing-fill); }
+:not(svg *).ve-added    { border: 2px solid var(--ve-added);      background: var(--ve-added-fill); }
+:not(svg *).ve-removed  { border: 2px dashed var(--ve-removed);   background: var(--ve-removed-fill); }
+:not(svg *).ve-changed  { border: 2px solid var(--ve-changed);    background: var(--ve-changed-fill); }
+
+.ve-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.ve-legend > li { padding: 4px 12px; border-radius: 6px; }
+
+/* Mermaid output, and what a frame shows when a block cannot be rendered. */
+pre.mermaid { margin: 0; color: var(--ve-muted); }
+.ve-mermaid svg { max-width: none; }
+.ve-error { margin: 0 0 8px; color: var(--ve-removed); font-weight: 600; }
+.ve-error + pre { margin: 0; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+
+/* Fixed to the window, outside the world. */
+#ve-hud, .ve-note {
+  position: fixed;
+  bottom: 10px;
+  padding: 4px 10px;
+  color: var(--ve-muted);
+  background: var(--ve-frame-bg);
+  border: 1px solid var(--ve-line);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: default;
+}
+#ve-hud, .ve-note {
+  box-sizing: border-box;
+  max-width: calc(50vw - 15px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#ve-hud { left: 10px; font-variant-numeric: tabular-nums; }
+.ve-note { right: 10px; margin: 0; }

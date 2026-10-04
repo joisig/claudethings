@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# visualexplain - helper for the visualexplain skill.
+#
+#   visualexplain mermaid-cache <tmp dir>
+#
+# Keeps a copy of the Mermaid library at <tmp dir>/visualexplain/mermaid.min.js, where
+# <tmp dir> is the tmp/ folder that holds the dated page folders. canvas.js loads that
+# copy first and the CDN second, so a page with Mermaid diagrams also works offline.
+#
+# The copy is downloaded when it is missing or older than 30 days. This is best
+# effort: when the download fails, an old copy stays in use, and with no copy at all
+# the page loads Mermaid from the CDN. So the only failure exit is a usage error.
+
+set -u
+
+URL="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+MAX_AGE_DAYS=30
+
+usage() {
+  sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[ "${1:-}" = "mermaid-cache" ] && [ -n "${2:-}" ] && [ $# -eq 2 ] || usage
+
+dir="$2/visualexplain"
+dest="$dir/mermaid.min.js"
+
+if [ -s "$dest" ] && [ -z "$(find "$dest" -mtime +"$MAX_AGE_DAYS" -print)" ]; then
+  echo "mermaid-cache: $dest is up to date"
+  exit 0
+fi
+
+fallback() {
+  if [ -s "$dest" ]; then
+    echo "mermaid-cache: $1; the old copy at $dest stays in use"
+  else
+    echo "mermaid-cache: $1; no local copy, the page will load Mermaid from the CDN"
+  fi
+  exit 0
+}
+
+mkdir -p "$dir" 2>/dev/null || fallback "cannot create $dir"
+
+part="$dest.part.$$"
+if curl -fsSL --max-time 60 -o "$part" "$URL" 2>/dev/null && [ -s "$part" ]; then
+  mv "$part" "$dest"
+  echo "mermaid-cache: downloaded $dest"
+else
+  rm -f "$part"
+  fallback "download failed"
+fi

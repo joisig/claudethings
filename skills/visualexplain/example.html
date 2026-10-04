@@ -1,0 +1,121 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>visualexplain: example</title>
+<!-- The reference page for the markup, and the manual test page for the shell.
+     This file links the shell with sibling-relative URLs so that it tests the
+     current checkout. A generated page uses the absolute URLs:
+       file:///Users/joi/.claude/skills/visualexplain/canvas.css
+       file:///Users/joi/.claude/skills/visualexplain/canvas.js -->
+<link rel="stylesheet" href="canvas.css">
+
+<div id="ve-world" style="--ve-cols: 3">
+  <h1>Example: a retry queue between the API and the worker</h1>
+  <p class="ve-lede">Failed jobs are lost today. The plan adds a queue that holds a
+    failed job and gives it back to the worker, at most three times.</p>
+
+  <!-- HTML frame: the legend. Needed when the page uses the status colours. -->
+  <section class="ve-frame">
+    <h2>Legend</h2>
+    <p class="ve-src">How to read the colours</p>
+    <ul class="ve-legend">
+      <li class="ve-existing">exists today</li>
+      <li class="ve-added">added</li>
+      <li class="ve-changed">changed</li>
+      <li class="ve-removed">removed</li>
+    </ul>
+  </section>
+
+  <!-- Mermaid frame: a standard diagram where automatic layout is good enough.
+       :::added, :::changed, :::removed and :::existing give the status colours in
+       flowcharts and state diagrams. Write &lt; for a "<" that is not a <br/>. -->
+  <section class="ve-frame">
+    <h2>Shape: after</h2>
+    <p class="ve-src">Plan section: "Design"</p>
+    <pre class="mermaid">
+      flowchart LR
+        api[API]:::existing --> worker[Worker]:::changed
+        worker -- "on failure" --> retry[(Retry queue)]:::added
+        retry -- "after backoff" --> worker
+        worker --> db[(Database)]:::existing
+    </pre>
+  </section>
+
+  <section class="ve-frame">
+    <h2>Order over time: one failed job</h2>
+    <p class="ve-src">Plan section: "Retry flow"</p>
+    <pre class="mermaid">
+      sequenceDiagram
+        participant A as API
+        participant W as Worker
+        participant Q as Retry queue
+        A->>W: job
+        W--xW: write fails
+        W->>Q: park job (attempt 1)
+        Note over Q: backoff 2 s
+        Q->>W: job again
+        W-->>A: done
+    </pre>
+  </section>
+
+  <!-- Freehand frame: a before/after pair. The same box is in the same place on
+       both sides, which automatic layout cannot promise. -->
+  <section class="ve-frame ve-wide">
+    <h2>Delta: before and after</h2>
+    <p class="ve-src">Plan sections: "Context", "Design"</p>
+    <svg viewBox="0 0 1000 250">
+      <text x="0" y="16" class="ve-label">BEFORE</text>
+      <rect class="ve-existing" x="0" y="40" width="130" height="56" rx="8"/>
+      <text x="65" y="73" text-anchor="middle">API</text>
+      <rect class="ve-existing" x="210" y="40" width="130" height="56" rx="8"/>
+      <text x="275" y="73" text-anchor="middle">Worker</text>
+      <path class="ve-arrow" d="M130,68 H208" marker-end="url(#ve-arrowhead)"/>
+      <path class="ve-removed" d="M275,96 V170" marker-end="url(#ve-arrowhead-removed)"/>
+      <text class="ve-removed" x="287" y="140">failed job is dropped</text>
+
+      <line class="ve-arrow" x1="480" y1="0" x2="480" y2="250" stroke-dasharray="2 6"/>
+
+      <text x="520" y="16" class="ve-label">AFTER</text>
+      <rect class="ve-existing" x="520" y="40" width="130" height="56" rx="8"/>
+      <text x="585" y="73" text-anchor="middle">API</text>
+      <rect class="ve-changed" x="730" y="40" width="130" height="56" rx="8"/>
+      <text x="795" y="73" text-anchor="middle">Worker</text>
+      <path class="ve-arrow" d="M650,68 H728" marker-end="url(#ve-arrowhead)"/>
+      <rect class="ve-added" x="730" y="170" width="130" height="56" rx="8"/>
+      <text x="795" y="203" text-anchor="middle">Retry queue</text>
+      <path class="ve-added" d="M770,96 V168" marker-end="url(#ve-arrowhead-added)"/>
+      <path class="ve-added" d="M820,170 V98" marker-end="url(#ve-arrowhead-added)"/>
+      <text class="ve-added" x="872" y="138">max 3 attempts</text>
+    </svg>
+  </section>
+
+  <!-- Freehand frame: the steps of the plan, the output of each, and a gate. Steps
+       and gates have no status, so they are ve-box, not a status class. -->
+  <section class="ve-frame">
+    <h2>Plan steps and gates</h2>
+    <p class="ve-src">Plan section: "Order of work"</p>
+    <svg viewBox="0 0 520 250">
+      <rect class="ve-box" x="0" y="20" width="150" height="50" rx="8"/>
+      <text x="75" y="50" text-anchor="middle">1. Queue table</text>
+      <text class="ve-label" x="0" y="90">output: migration</text>
+
+      <path class="ve-arrow" d="M150,45 H198" marker-end="url(#ve-arrowhead)"/>
+      <polygon class="ve-box" points="250,5 300,45 250,85 200,45"/>
+      <text x="250" y="50" text-anchor="middle" font-size="12">load ok?</text>
+
+      <path class="ve-arrow" d="M300,45 H348" marker-end="url(#ve-arrowhead)"/>
+      <text class="ve-label" x="312" y="36">yes</text>
+      <rect class="ve-box" x="350" y="20" width="150" height="50" rx="8"/>
+      <text x="425" y="50" text-anchor="middle">2. Worker retry</text>
+
+      <path class="ve-arrow" d="M250,85 V158" marker-end="url(#ve-arrowhead)"/>
+      <text class="ve-label" x="262" y="125">no</text>
+      <rect class="ve-box" x="175" y="160" width="150" height="50" rx="8"/>
+      <text x="250" y="190" text-anchor="middle">1b. Add an index</text>
+      <path class="ve-arrow" d="M175,185 H75 V72" marker-end="url(#ve-arrowhead)"/>
+      <text class="ve-label" x="0" y="230">the load result feeds the backoff value in step 2</text>
+    </svg>
+  </section>
+</div>
+
+<p class="ve-note">Sketch of example plan, 2026-10-04 10:00. The plan text is the authority.</p>
+<script src="canvas.js"></script>

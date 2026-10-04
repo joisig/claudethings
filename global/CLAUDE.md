@@ -8,6 +8,12 @@
 - **Everything else** (design documents and other non-code, non-plan work): run it only when I ask. When we work on a design-document type of task, you can remind me that it is available.
 - How to handle the feedback is in the skill: ask me when you are not sure, offer simpler tradeoffs for me to judge as options against taking on complexity from a review comment, and give the reviewer no context beyond the review request.
 
+## Visual explanation (the `visualexplain` skill)
+
+- **Plans:** for the first version of a plan, after `advreview` and before you show it to me, decide with the skill's rules if a picture helps. If it does, build the page. If it does not, say so in one line. For later versions of a plan, build a page only when I ask.
+- **Plan mode:** the page is part of the plan, not a change to the project. In plan mode you may write that one HTML file and run the skill's Mermaid cache command. I permit it here on purpose. If you cannot write the page there, tell me in one line which views it would have, and I will ask for the page outside plan mode.
+- **Everything else** (code changes, existing subsystems, documents): only when I ask.
+
 ## TODOR comments and plan feedback
 
 - `TODOR` means "TODO from Review". A comment with that prefix is a review comment from me to you.

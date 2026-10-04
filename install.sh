@@ -8,6 +8,7 @@
 # - clipboard-richtext: Copy markdown to clipboard as rich text (for Google Docs)
 # - daylog: Reconstruct what I was doing on a given day or week
 # - advreview: Adversarial review by Codex of the current code changes or plan
+# - visualexplain: Draw a plan, a change or a subsystem as a pan-and-zoom HTML page
 # - wtconsolidate: Consolidate finished worktree work on main (linked into bboo only)
 #
 
@@ -41,10 +42,11 @@ for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot sh
     echo "  $skill -> $skill_dir/SKILL.md"
 done
 
-# daylog and advreview ship more than a SKILL.md (bin/, and for daylog config.sh and
-# reference/), so the whole directory is linked rather than the single file.
+# daylog, advreview and visualexplain ship more than a SKILL.md (bin/, for daylog
+# config.sh and reference/, for visualexplain the canvas shell), so the whole
+# directory is linked rather than the single file.
 chmod +x "$SCRIPT_DIR/skills/advreview/bin/advreview-listen"
-for skill in daylog advreview; do
+for skill in daylog advreview visualexplain; do
     chmod +x "$SCRIPT_DIR/skills/$skill/bin/$skill"
     skill_dir="$CLAUDE_DIR/skills/$skill"
     [ -L "$skill_dir" ] && rm -f "$skill_dir"
@@ -106,6 +108,7 @@ bear_reader = os.path.expanduser("~/p/claudethings/bear_reader.py")
 daylog = os.path.expanduser("~/.claude/skills/daylog/bin/daylog")
 advreview = os.path.expanduser("~/.claude/skills/advreview/bin/advreview")
 wtsurvey = os.path.expanduser("~/p/claudethings/skills/wtconsolidate/bin/wtsurvey")
+visualexplain = os.path.expanduser("~/.claude/skills/visualexplain/bin/visualexplain")
 
 # Permissions to add
 new_permissions = [
@@ -137,6 +140,9 @@ new_permissions = [
     # wtconsolidate (the survey tool is read-only; the skill is linked into bboo only)
     f"Bash({wtsurvey}:*)",
     "Skill(wtconsolidate)",
+    # visualexplain (the helper only keeps the Mermaid cache in a tmp/ folder)
+    f"Bash({visualexplain}:*)",
+    "Skill(visualexplain)",
     # shared temp file
     "Edit(/tmp/clipboard_content.md)",
 ]
@@ -188,6 +194,7 @@ echo "  - clipboard-markdown:  Copy markdown to clipboard as plain text"
 echo "  - clipboard-richtext:  Copy markdown to clipboard as rich text"
 echo "  - daylog:              Reconstruct a past working day or week"
 echo "  - advreview:           Adversarial review by Codex (code changes or a plan)"
+echo "  - visualexplain:       Draw a plan, a change or a subsystem as an HTML page"
 echo ""
 echo "Tools:"
 echo "  - $SCRIPT_DIR/bear_reader.py"
