@@ -330,11 +330,14 @@ def cmd_tests(args):
     print(f"TEST LOG  {log}  ({len(entries)} entries, newest first; drift is measured to the trunk's HEAD)")
     print()
     for e in reversed(entries):
-        commit, paths = e.get("commit", ""), e.get("paths") or []
+        # `commit` is null when the tested commit is not known (allowed for manual results).
+        commit, paths = e.get("commit") or "", e.get("paths") or []
         print(f"  [{e.get('result', '?')}] {e.get('theme', '?')} — {e.get('what', '')}")
-        print(f"    {e.get('kind', '?')}, {e.get('at', '?')[:16]}, consolidation {e.get('consolidation', '?')}, "
+        print(f"    {e.get('kind', '?')}, {(e.get('at') or '?')[:16]}, consolidation {e.get('consolidation', '?')}, "
               f"at {commit[:8] or '?'}")
-        if git(repo, "cat-file", "-e", f"{commit}^{{commit}}", check=False).returncode != 0:
+        if not commit:
+            print("    drift   unknown: the tested commit is not known")
+        elif git(repo, "cat-file", "-e", f"{commit}^{{commit}}", check=False).returncode != 0:
             print("    drift   unknown: the commit is not in this repository")
         else:
             if git(repo, "merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode != 0:
