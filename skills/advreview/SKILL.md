@@ -22,6 +22,9 @@ Always use that absolute path. Run it from the repository root.
 | `base <branch>` | The current branch against `<branch>` (Codex `/review`, against a base) |
 | `plan <file>` | The plan or design document at `<file>`, checked against the repository |
 
+In every mode the reviewer is told not to run tests or builds. You run them yourself,
+and the Codex sandbox often cannot.
+
 A review takes several minutes. Run the tool with `run_in_background: true` and wait
 for the notification. Do not poll.
 

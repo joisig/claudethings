@@ -25,7 +25,14 @@ SPOOL="${ADVREVIEW_SPOOL:-$HOME/.local/run/advreview}"
 WAIT_SECONDS="${ADVREVIEW_WAIT_SECONDS:-2700}"
 START_HINT="Start it outside the sandbox: ~/.claude/skills/advreview/bin/advreview-listen (claudethings/tools/dev-services starts it too)."
 
-PLAN_PROMPT='Do an adversarial review of the plan document at the path below. Check its claims against the code in this repository. Report concrete problems: wrong assumptions, missing cases, risks, steps that will not work as written, and places where a simpler approach would do. Do not change any files. Plan document: '
+# The caller already ran the tests, and the Codex sandbox often cannot run them anyway.
+NO_TESTS='Do not run tests or builds; the author runs them separately.'
+
+PLAN_PROMPT="Do an adversarial review of the plan document at the path below. Check its claims against the code in this repository. Report concrete problems: wrong assumptions, missing cases, risks, steps that will not work as written, and places where a simpler approach would do. Do not change any files. $NO_TESTS Plan document: "
+
+# Codex refuses custom instructions together with --uncommitted or --base, so these are
+# its own built-in target prompts for those modes, plus NO_TESTS.
+UNCOMMITTED_PROMPT="Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings. $NO_TESTS"
 
 die() { echo "advreview: $*" >&2; exit 2; }
 
@@ -107,9 +114,14 @@ run() {
   final="$work/review.md"
   log="$work/transcript.log"
 
+  local base_sha
+  if [ "$mode" = base ]; then
+    base_sha="$(git merge-base HEAD "$arg")" || die "no merge base between HEAD and '$arg'"
+  fi
+
   case "$mode" in
-    uncommitted) codex exec review -m "$model" --uncommitted -o "$final" > "$log" 2>&1 ;;
-    base)        codex exec review -m "$model" --base "$arg" -o "$final" > "$log" 2>&1 ;;
+    uncommitted) codex exec review -m "$model" -o "$final" "$UNCOMMITTED_PROMPT" > "$log" 2>&1 ;;
+    base)        codex exec review -m "$model" -o "$final" "Review the code changes against the base branch '$arg'. The merge base commit for this comparison is $base_sha. Run \`git diff $base_sha\` to inspect the changes relative to $arg. Provide prioritized, actionable findings. $NO_TESTS" > "$log" 2>&1 ;;
     plan)        codex exec -m "$model" -s read-only -o "$final" "$PLAN_PROMPT$arg" > "$log" 2>&1 ;;
   esac
   status=$?
