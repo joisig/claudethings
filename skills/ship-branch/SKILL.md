@@ -1,6 +1,6 @@
 ---
 name: ship-branch
-description: For the CrankWheel protos repo and its worktrees. Ship the current work as a pull request for review, then hand the branch off for testing in another worktree. Puts the work on a joi-* feature branch, commits anything uncommitted, pushes, opens a PR with gitradik as reviewer, comments which milestone it is for and that Jói will comment again after local testing, and switches this worktree back to its home branch. Use when the user asks to "ship this", "check out a feature branch, commit, push and make a PR", or similar. Takes an optional milestone name (e.g. M182).
+description: For the CrankWheel protos repo and its worktrees. Ship the current work as a pull request for review, then hand the branch off for testing in another worktree. Puts the work on a joi-* feature branch, commits anything uncommitted, pushes, opens a PR with gitradik as reviewer, comments which milestone it is for (and, only when asked, that Jói will comment again after local testing), and switches this worktree back to its home branch. Use when the user asks to "ship this", "check out a feature branch, commit, push and make a PR", or similar. Takes an optional milestone name (e.g. M182).
 ---
 
 # ship-branch
@@ -11,8 +11,10 @@ branch so it can be checked out in another worktree for testing.
 ## Usage
 
 - `/ship-branch M182` — the PR comment says the work is for M182.
-- `/ship-branch` — no milestone; the PR comment only says that Jói will
-  comment again after local testing.
+- `/ship-branch` — no milestone and no PR comment.
+- Add the "I will comment again after it is tested locally" line only when
+  the user asks for it (for example `/ship-branch M182 local test`, or
+  "say I'll comment after local testing"). Never add it by default.
 
 ## Where we might start
 
@@ -98,10 +100,14 @@ If a PR already exists, make sure `gitradik` is a reviewer
 
 ### 6. Comment
 
-Add one comment to the PR with `gh pr comment <n> --body "..."`:
+Add at most one comment to the PR with `gh pr comment <n> --body "..."`.
+Do not add the local-testing line unless the user asked for it in this
+request.
 
-- with a milestone: `This is for M182. I will comment again after it is tested locally.`
-- without one: `I will comment again after this is tested locally.`
+- milestone only: `This is for M182.`
+- milestone, local-testing line asked for: `This is for M182. I will comment again after it is tested locally.`
+- no milestone, local-testing line asked for: `I will comment again after this is tested locally.`
+- neither: no comment; skip this step.
 
 ### 7. Switch back to the home branch
 
