@@ -11,9 +11,9 @@
       ran in that worktree (live sessions first, then the most recent ones).
 
   wtsurvey tests [--repo DIR]
-      The test log that consolidations keep (tmp/<date>-wtconsolidate/test-log.jsonl
-      in the trunk), newest first, with how much each entry's paths have changed
-      since the commit it was tested on.
+      The test log that consolidations keep (every tmp/<date>-wtconsolidate/test-log.jsonl
+      in the trunk, read together), newest first, with how much each entry's paths
+      have changed since the commit it was tested on.
 
 Nothing here writes to a repository or a working tree. Merge predictions use
 `git merge-tree`, which merges in the object store only.
@@ -306,28 +306,32 @@ def cmd_tail(args):
         print()
 
 
-def records_dir(repo):
-    """The <date>-wtconsolidate folder under the trunk's tmp/, or None before the first run."""
-    found = sorted(glob.glob(os.path.join(repo, "tmp", "*-wtconsolidate")))
-    return found[0] if found else None
+def test_logs(repo):
+    """The test-log.jsonl of every <date>-wtconsolidate folder under the trunk's tmp/, oldest folder first."""
+    return sorted(glob.glob(os.path.join(repo, "tmp", "*-wtconsolidate", "test-log.jsonl")))
 
 
 def cmd_tests(args):
     repo = worktrees(out(args.repo, "rev-parse", "--show-toplevel"))[0]["path"]
-    folder = records_dir(repo)
-    log = os.path.join(folder, "test-log.jsonl") if folder else None
-    if not log or not os.path.exists(log):
+    logs = test_logs(repo)
+    if not logs:
         print(f"no test log yet (looked for {repo}/tmp/*-wtconsolidate/test-log.jsonl)")
         return
     entries = []
-    with open(log) as f:
-        for number, line in enumerate(f, 1):
-            if line.strip():
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError as e:
-                    sys.exit(f"{log} line {number} is not valid JSON: {e}")
-    print(f"TEST LOG  {log}  ({len(entries)} entries, newest first; drift is measured to the trunk's HEAD)")
+    for log in logs:
+        with open(log) as f:
+            for number, line in enumerate(f, 1):
+                if line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        sys.exit(f"{log} line {number} is not valid JSON: {e}")
+    # Manual results can be appended to an older folder days later, so order by time, not by file.
+    # The sort is stable: entries without `at` keep their file order.
+    entries.sort(key=lambda e: e.get("at") or "")
+    print(f"TEST LOG  {len(logs)} files  ({len(entries)} entries, newest first; drift is measured to the trunk's HEAD)")
+    for log in logs:
+        print(f"  {log}")
     print()
     for e in reversed(entries):
         # `commit` is null when the tested commit is not known (allowed for manual results).

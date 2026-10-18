@@ -75,18 +75,25 @@ was tested on.
 
 ## Records
 
-All consolidations of a repository share one folder in the trunk's gitignored
-`tmp/`: `tmp/<date>-wtconsolidate/`, where the date is the day of the first
-consolidation. If a `tmp/*-wtconsolidate/` folder exists, use it. Do not create a
-second one.
+Each consolidation writes its records in the trunk's gitignored `tmp/`, in
+`tmp/<date>-wtconsolidate/`, where the date is the day this consolidation started.
+Do not reuse the folder of an earlier day: a new consolidation on a new day gets a
+new folder. Two consolidations on the same day share the folder. A consolidation
+that continues on a later day, and manual results recorded days later, stay in the
+folder where that consolidation started. This rule replaces the general rule to
+keep one dated `tmp/` folder for a whole project.
 
 ```
-tmp/2026-10-02-wtconsolidate/
-  test-log.jsonl                  every test result, from all consolidations
+tmp/2026-10-18-wtconsolidate/
+  test-log.jsonl                  the test results recorded for the consolidations in this folder
   consolidate-N/summary.md        what this consolidation did
   consolidate-N/test-plan.html    the plan from Step 9
   consolidate-N/logs/             output of the automated runs
 ```
+
+To find consolidation N's records, look for `tmp/*-wtconsolidate/consolidate-N/`.
+The test history is all the `tmp/*-wtconsolidate/test-log.jsonl` files together;
+`wtsurvey tests` reads all of them.
 
 ### summary.md
 
@@ -112,7 +119,8 @@ The sections:
 
 ### test-log.jsonl
 
-One JSON object per line, appended, never rewritten. One line per thing that was
+One JSON object per line, appended, never rewritten. Append to the file in the
+folder of the consolidation that the result belongs to. One line per thing that was
 tested, at the grain of a theme or a named part of a theme, not of a single
 assertion.
 
@@ -132,7 +140,7 @@ assertion.
 | `what` | For a suite-wide run such as `mix precommit`, write one line per theme with the same `what`, so that each theme carries its own paths. A green suite only proves what the suite covers: say in `notes` what it leaves out for this theme (in bboo the default run excludes the integration and `expensiveintegration` tests) |
 
 A later failure does not remove an earlier pass: append the new line. The newest
-line for a theme and `what` is the current state.
+line for a theme and `what`, across all the folders, is the current state.
 
 ## Step 1 — survey
 
@@ -142,7 +150,7 @@ line for a theme and `what` is the current state.
 2. Run `wtsurvey survey`. Call `ListAgents` too: it is the authority on which
    sessions are live, and it gives the names you need for Step 7.
 3. A consolidation is unfinished when the survey says `UNFINISHED` (a start tag
-   without an end tag), or when the newest `consolidate-N/summary.md` does not
+   without an end tag), or when the newest `tmp/*-wtconsolidate/consolidate-N/summary.md` does not
    say `Status: finished`. Read that summary and the start tag's message
    (`git tag -l -n99 consolidate-start-N`), work out how far it came, and ask the
    user whether to continue it or to start a new one.
@@ -377,7 +385,7 @@ conflict). Then one line that says which files.
 Write one self-contained HTML file and open it:
 
 ```
-~/q/bboo/main/tmp/<date>-wtconsolidate/consolidate-N/test-plan.html
+~/q/bboo/main/tmp/<date this consolidation started>-wtconsolidate/consolidate-N/test-plan.html
 ```
 
 This is a memory aid for the user, who worked on these changes in the last few
@@ -513,8 +521,8 @@ with that worktree as the target in place of the trunk. What changes:
 - **No migrations.** In bboo they run only from `main`. In Step 8, list the
   migrations the consolidation brings and say that they run when the target
   reaches `main`.
-- **Tags and records** keep the same names and the same folder in the trunk's
-  `tmp/` (the numbering is shared). Write `target <worktree> <branch> <sha>` in
+- **Tags and records** keep the same names and the same dated folders in the
+  trunk's `tmp/` (the numbering is shared). Write `target <worktree> <branch> <sha>` in
   the start tag's message in place of the `trunk` line, and the target in the
   header of `summary.md` and of the plan.
 - **Step 6:** consolidated worktrees end on their home branch, equal to the
