@@ -66,42 +66,38 @@ archive/<theme>/...                            done and dropped projects
 ## A project file
 
 ```markdown
----
-title: Session diagnostics for reconnect problems
-state: active            # active | paused | done | dropped
-reentry: medium          # low | medium | high
-created: 2026-10-14
-touched: 2026-10-22      # last real work on it
----
+# Session diagnostics for reconnect problems
+
+State: active · Re-entry: medium · Created: 2026-10-14 · Touched: 2026-10-22
 
 ## Goal
 Two or three lines.
 
 ## Brief
-- Where things stand.
-- Plan documents (absolute paths); worktree and session ID of the last session.
-- How to start again: what to read first, what to run.
+- Where things stand, in one or two bullets.
+- The next move and how to start it (what to read first, what to run).
 - Traps and decisions that are not obvious from the code.
+- Links: plan and handoff documents (absolute paths), notes.md, last session ID.
 
 ## Work
 - ~/w/protos · branch joi-session-diag · commit 3f2a9c1 · PR https://github.com/CrankWheel/protos/pull/1234
 
 ## Waiting on others
 - [ ] Fix reconnect bug in session-diag
-      Waiting: @rodion since 2026-10-20 · nudge 2026-10-24
-      Thread: https://mail.superhuman.com/...
-      Then: review the PR, run the soak test
+  - Waiting: @rodion since 2026-10-20 · nudge 2026-10-24
+  - Thread: https://mail.superhuman.com/...
+  - Then: review the PR, run the soak test
 
 ## Ready for me
 - [ ] Manual test of Salesforce brand-account switching
-      Size: 30 min · shallow · protos, any worktree
-      Unblocks: @yuliia
+  - Size: 30 min · shallow · protos, any worktree
+  - Unblocks: @yuliia
 
 ## Later
 - [ ] Check 5 days of prod data for the reconnect spike
-      Not before: 2026-10-27
-      Size: 15 min · shallow · no worktree
-      How: run X, look for Y. Good means Z.
+  - Not before: 2026-10-27
+  - Size: 15 min · shallow · no worktree
+  - How: run X, look for Y. Good means Z.
 
 ## Backlog
 - Idea: per-account diag toggle
@@ -113,12 +109,25 @@ Two or three lines.
 - 2026-10-22 16:40 · ~70 min (guessed 30) · added the soak-test script; waiting on Rodion
 ```
 
+**Header.** `# Title`, then one line: `State:` (active, paused, done, dropped),
+`Re-entry:` (low, medium, high), `Created:` and `Touched:` (last real work), joined
+with ` · `. No YAML frontmatter: a WYSIWYG editor can turn it into a heading on save.
+
 The allowed sections are Goal, Brief, Work, Waiting on others, Ready for me, Later,
 Backlog, Done, Log and Notes, in that order. Leave out the ones a project does not
 need.
 
-**Item lines.** A `- [ ]` line, then indented `Key: value` lines, all with the same
-indent. A line indented deeper continues the previous key.
+**Keep it scannable.** Joi reads these files in an editor. The Brief is about 5 to 8
+short bullets. Longer context goes in linked files, not in the project file: a plan
+or handoff document in the repo's `tmp/` folder, or a `notes.md` next to the project
+(the project then becomes a folder: `<theme>/<slug>/README.md` plus `notes.md`). Item
+text is one line; details go in the item's keys.
+
+**Item lines.** A `- [ ]` line, then nested `- Key: value` bullets under it (indented
+two spaces). An indented line that is not a bullet continues the previous key. No
+other nested bullets: a nested checkbox or note is an error, so write it as a key
+(`Then:`, `Waiting:`) or as a separate item. The parser undoes the escaping that
+markdown editors add on save (`\~`, `&gt;`).
 
 | Key | Value |
 |---|---|
@@ -194,7 +203,7 @@ new project. Find the project with `projects find` (or Joi names it). Then:
 2. **Items:** check off what is done and move it to "Done"; move items between
    sections; add new items with `Size:`. Every wait gets `Waiting:` or `Not before:`,
    and `How:` where it applies.
-3. **Frontmatter and Work:** renew `reentry` and `touched`; update the Work lines
+3. **Header and Work:** renew `Re-entry` and `Touched`; update the Work lines
    (branch, last relevant commit SHA, PR URLs).
 4. **Log line:** `- <YYYY-MM-DD HH:MM> · ~<N> min (guessed <G>) · <what happened>`.
    N is `projects session-time --since "<time of this project's previous log line>"`
@@ -208,7 +217,7 @@ work starts on a protected or home branch. Then the branch is where work resumes
 
 ## Re-entry, sizes and calibration
 
-- `reentry` is your guess at how much re-reading and remembering it takes to start
+- `Re-entry` is your guess at how much re-reading and remembering it takes to start
   again: low (5 min), medium (15), high (30). Base it on the brief and on how tangled
   the work is. `fit` raises it one level when the project is untouched for more than
   21 days.
@@ -247,7 +256,7 @@ Projects are not closed eagerly. On "tidy up projects":
 3. `projects next` for pending handoffs (sessions that ended without one).
 4. Email threads only when Joi asks.
 
-Then propose one list, project by project: **close** (state `done`, move to
+Then propose one list, project by project: **close** (`State: done`, move to
 `archive/<theme>/`), **chunk landed** (check items, keep open), **stale** (ask), or
 **leave open**. Shipped with `ship-branch` and landed on main means done; shipped
 alone does not, because review and follow-ups remain. After Joi confirms, make the

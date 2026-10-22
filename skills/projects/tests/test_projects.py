@@ -43,13 +43,9 @@ def write(path, text):
 
 
 PROJECT = """
----
-title: Session diagnostics
-state: active
-reentry: medium
-created: 2026-10-14
-touched: {touched}
----
+# Session diagnostics
+
+State: active · Re-entry: medium · Created: 2026-10-14 · Touched: {touched}
 
 ## Goal
 Find the reconnect problem.
@@ -62,24 +58,24 @@ Find the reconnect problem.
 
 ## Waiting on others
 - [ ] Fix reconnect bug
-      Waiting: @rodion since {since} · nudge {nudge}
-      Thread: https://mail.superhuman.com/thread/1
+  - Waiting: @rodion since {since} · nudge {nudge}
+  - Thread: https://mail.superhuman.com/thread/1
 
 ## Ready for me
 - [ ] Manual test of switching
-      Size: 30 min · shallow · protos, any worktree
-      Unblocks: @yuliia
+  - Size: 30 min · shallow · protos, any worktree
+  - Unblocks: @yuliia
 - [ ] Deep refactor
-      Size: 60 min · deep · protos, branch joi-diag
+  - Size: 60 min · deep · protos, branch joi-diag
 
 ## Later
 - [ ] Check prod data
-      Not before: {later}
-      Size: 15 min · shallow · no worktree
-      How: run X, look for Y.
-        Good means Z.
+  - Not before: {later}
+  - Size: 15 min · shallow · no worktree
+  - How: run X, look for Y.
+    Good means Z.
 - [ ] Turn logging off
-      Not before: after crankwheel/diag: Check prod
+  - Not before: after crankwheel/diag: Check prod
 
 ## Backlog
 - Idea: a toggle
@@ -173,7 +169,7 @@ class TestParse(Fixture):
         with open(path) as f:
             text = f.read()
         with open(path, "w") as f:
-            f.write(text.replace("      Unblocks: @yuliia", "      Unblock: @yuliia"))
+            f.write(text.replace("  - Unblocks: @yuliia", "  - Unblock: @yuliia"))
         _, _, _, errors = P.load_all()
         self.assertEqual(len(errors), 1)
         self.assertIn("known key", errors[0])
@@ -184,6 +180,30 @@ class TestParse(Fixture):
             f.write("\n## Random\nx\n")
         _, _, _, errors = P.load_all()
         self.assertIn("unknown section", errors[0])
+
+    def test_survives_a_wysiwyg_editor_rewrite(self):
+        # What CowCo wrote on save: blank lines after headings, escaped ~ and >.
+        path = os.path.join(self.root, "crankwheel", "diag.md")
+        with open(path) as f:
+            text = f.read()
+        text = text.replace("## Goal\n", "## Goal\n\n")
+        text = text.replace("- [ ] Fix reconnect bug", "- [ ] Fix reconnect bug -&gt; asked again")
+        text = text.replace("~70 min", "\\~70 min")
+        with open(path, "w") as f:
+            f.write(text)
+        themes, people, projects = self.load()
+        self.assertEqual(projects[0].items[0].text, "Fix reconnect bug -> asked again")
+        self.assertEqual(projects[0].log[0][1].split(" · ")[1], "~70 min (guessed 30)")
+        self.assertEqual(P.validate(themes, people, projects), [])
+
+    def test_nested_checkbox_is_an_error(self):
+        path = os.path.join(self.root, "crankwheel", "diag.md")
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace("  - Unblocks: @yuliia", "  - [ ] delegated to someone"))
+        _, _, _, errors = P.load_all()
+        self.assertIn("known key", errors[0])
 
     def test_bad_size(self):
         with self.assertRaises(P.ParseError):
@@ -201,7 +221,7 @@ class TestValidate(Fixture):
         path = os.path.join(self.root, "crankwheel", "diag.md")
         with open(path) as f:
             text = f.read()
-        text = text.replace(f"      Not before: {d(2)}\n", "").replace("@yuliia", "@nobody")
+        text = text.replace(f"  - Not before: {d(2)}\n", "").replace("@yuliia", "@nobody")
         with open(path, "w") as f:
             f.write(text)
         errs = self.errors()
@@ -223,13 +243,10 @@ class TestValidate(Fixture):
 
     def test_reference_into_archive(self):
         write(os.path.join(self.root, "archive", "personal", "old.md"), """
-            ---
-            title: Old
-            state: done
-            reentry: low
-            created: 2026-01-01
-            touched: 2026-01-02
-            ---
+            # Old
+
+            State: done · Re-entry: low · Created: 2026-01-01 · Touched: 2026-01-02
+
             ## Goal
             Old.
             """)
@@ -248,7 +265,7 @@ class TestValidate(Fixture):
         with open(path) as f:
             text = f.read()
         with open(path, "w") as f:
-            f.write(text.replace("state: active", "state: done"))
+            f.write(text.replace("State: active", "State: done"))
         self.assertTrue(any("move it to archive" in e for e in self.errors()))
 
 
