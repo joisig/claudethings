@@ -14,6 +14,13 @@
 - **Plan mode:** the page is part of the plan, not a change to the project. In plan mode you may write that one HTML file and run the skill's Mermaid cache command. I permit it here on purpose. If you cannot write the page there, tell me in one line which views it would have, and I will ask for the page outside plan mode.
 - **Everything else** (code changes, existing subsystems, documents): only when I ask.
 
+## Project tracker (the `projects` skill)
+
+- `~/p/projects` tracks my multi-session projects. Load the `projects` skill when I ask about projects, next steps, the backlog, nudges, or what fits the time I have.
+- When work in any repo belongs to a tracked project (`projects find`, or I name it), do the skill's handoff before we wrap up: rewrite the brief, update the items, the Work lines and the log, and save.
+- When work grows into a project (more than one session, or a wait or a gate), offer to create one.
+- A natural end point is when I say we are wrapping up, after `ship-branch`, after `wtconsolidate`, or when we stop with something left to do. Offer the handoff there in one line.
+
 ## TODOR comments and plan feedback
 
 - `TODOR` means "TODO from Review". A comment with that prefix is a review comment from me to you.

@@ -154,13 +154,23 @@ request.
 - no release, local-testing line asked for: `I will comment again after this is tested locally.`
 - neither: no comment; skip this step.
 
-### 8. Switch back to the home branch
+### 8. Update the project tracker
+
+Do this before the switch in step 9, while the feature branch is still checked out.
+Run `/Users/joi/.claude/skills/projects/bin/projects find`. If the work belongs to a
+project, update it with the `projects` skill: the Work line gets the feature branch,
+its tip SHA (`git rev-parse HEAD`) and the PR URL, and the item moves to "Waiting on
+others" with `Waiting: @rodion since <today>`. The project is not done: review and
+follow-ups remain. If no project matches, go on.
+
+### 9. Switch back to the home branch
 
 Run `git checkout <home branch>`. The tree must be clean first; if it is
 not, stop and tell the user what is left. When this is done, the feature
 branch is free to be checked out in another worktree for testing.
 
-### 9. Report
+### 10. Report
 
 Give the PR URL, the branch name, the result of the pre-push tests, the
-Release that was set (if any), and the branch this worktree is now on.
+Release that was set (if any), the project that was updated (if any), and the
+branch this worktree is now on.

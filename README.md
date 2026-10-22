@@ -13,6 +13,7 @@ matching permissions to `~/.claude/settings.json`.
 | `advreview` | Adversarial review by Codex (newest astra model) of the current code changes or plan |
 | `visualexplain` | Draw a plan, a code change or a subsystem as a local HTML page on a pan-and-zoom canvas |
 | `wtconsolidate` | Merge finished work from a repo's parallel worktrees into main, then write a test plan (linked into bboo only) |
+| `projects` | My project tracker in `~/p/projects`: briefs, to-dos, waits on people, what fits the time I have |
 
 `daylog` combines Google Calendar and sent mail (via `gog`), git commits across
 my repos, GitHub activity, and my Bear WPlan/DPlan notes. Repos and accounts are
@@ -41,6 +42,16 @@ shell. The rule for when Claude builds a page without being asked is in
 read-only helper, `skills/wtconsolidate/bin/wtsurvey`, reports each worktree's state,
 its Claude Code sessions and the predicted merge conflicts. To use the skill in
 another repo, link it there the same way and see "Other repositories" in its SKILL.md.
+
+`projects` reads and writes `~/p/projects`, a local git repo of markdown files with one
+file per project, grouped by theme (`themes.md`, `people.md`). The tool
+`skills/projects/bin/projects` validates the files, renders the git-ignored overviews,
+answers "what is next" and "what fits 40 minutes", checks whether a project's commits
+or PRs landed, lists Claude Code sessions, and is the only thing that commits there.
+`install.sh` also installs two hooks: Stop (at most once an hour, a reminder to offer a
+project handoff after real work in a theme's repo) and SessionEnd (records sessions
+that ended without one). `PROJECTS_HOOKS=off` turns them off. Tests:
+`python3 -m unittest discover skills/projects/tests`.
 
 `global/CLAUDE.md` is my global instructions file. `install.sh` links it to
 `~/.claude/CLAUDE.md`. `commands/commit.md` is my `/commit` command, linked to

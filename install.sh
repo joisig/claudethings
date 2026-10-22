@@ -10,6 +10,7 @@
 # - advreview: Adversarial review by Codex of the current code changes or plan
 # - visualexplain: Draw a plan, a change or a subsystem as a pan-and-zoom HTML page
 # - wtconsolidate: Consolidate finished worktree work on main (linked into bboo only)
+# - projects: The project tracker in ~/p/projects (skill, tool and two hooks)
 #
 
 set -e
@@ -42,11 +43,11 @@ for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot sh
     echo "  $skill -> $skill_dir/SKILL.md"
 done
 
-# daylog, advreview and visualexplain ship more than a SKILL.md (bin/, for daylog
-# config.sh and reference/, for visualexplain the canvas shell), so the whole
+# daylog, advreview, visualexplain and projects ship more than a SKILL.md (bin/, for
+# daylog config.sh and reference/, for visualexplain the canvas shell), so the whole
 # directory is linked rather than the single file.
 chmod +x "$SCRIPT_DIR/skills/advreview/bin/advreview-listen"
-for skill in daylog advreview visualexplain; do
+for skill in daylog advreview visualexplain projects; do
     chmod +x "$SCRIPT_DIR/skills/$skill/bin/$skill"
     skill_dir="$CLAUDE_DIR/skills/$skill"
     [ -L "$skill_dir" ] && rm -f "$skill_dir"
@@ -67,6 +68,16 @@ if [ -d "$bboo_main/.claude/skills" ]; then
     grep -qxF '.claude/skills/wtconsolidate' "$bboo_main/.git/info/exclude" ||
         echo '.claude/skills/wtconsolidate' >> "$bboo_main/.git/info/exclude"
     echo "  wtconsolidate -> $bboo_main/.claude/skills/wtconsolidate"
+fi
+
+# The project tracker's repo. Created empty when missing; never touched when present.
+projects_repo="$HOME/p/projects"
+if [ ! -d "$projects_repo/.git" ]; then
+    mkdir -p "$projects_repo"
+    git -C "$projects_repo" init -q -b main
+    git -C "$projects_repo" config user.name "Joi Sigurdsson"
+    git -C "$projects_repo" config user.email joi@quarter.is
+    echo "  Created $projects_repo (empty git repo; the projects skill bootstraps it)"
 fi
 
 # The global instructions file (~/.claude/CLAUDE.md) is kept in this repo and linked.
@@ -109,6 +120,10 @@ daylog = os.path.expanduser("~/.claude/skills/daylog/bin/daylog")
 advreview = os.path.expanduser("~/.claude/skills/advreview/bin/advreview")
 wtsurvey = os.path.expanduser("~/p/claudethings/skills/wtconsolidate/bin/wtsurvey")
 visualexplain = os.path.expanduser("~/.claude/skills/visualexplain/bin/visualexplain")
+projects = os.path.expanduser("~/.claude/skills/projects/bin/projects")
+# File rules need "~/" or "//" for paths outside the project; a single leading "/" is
+# relative to the settings file.
+projects_repo = "~/p/projects"
 
 # Permissions to add
 new_permissions = [
@@ -143,6 +158,11 @@ new_permissions = [
     # visualexplain (the helper only keeps the Mermaid cache in a tmp/ folder)
     f"Bash({visualexplain}:*)",
     "Skill(visualexplain)",
+    # projects (the tool is the only thing that commits in ~/p/projects)
+    f"Bash({projects}:*)",
+    f"Read({projects_repo}/**)",
+    f"Edit({projects_repo}/**)",
+    "Skill(projects)",
     # shared temp file
     "Edit(/tmp/clipboard_content.md)",
 ]
@@ -172,6 +192,19 @@ for perm in new_permissions:
     else:
         print(f"  Already exists: {perm}")
 
+# Hooks for the projects skill (Stop: a rate-limited handoff reminder; SessionEnd:
+# record sessions that ended without a handoff). Added once; to remove them, delete
+# the entries or set PROJECTS_HOOKS=off.
+hooks = settings.setdefault("hooks", {})
+for event, arg in (("Stop", "stop"), ("SessionEnd", "session-end")):
+    command = f"{projects} hook {arg}"
+    entries = hooks.setdefault(event, [])
+    if any(h.get("command") == command for e in entries for h in e.get("hooks", [])):
+        print(f"  Hook already exists: {event}")
+    else:
+        entries.append({"hooks": [{"type": "command", "command": command}]})
+        print(f"  Added hook: {event} -> {command}")
+
 # Write updated settings
 with open(settings_file, 'w') as f:
     json.dump(settings, f, indent=2)
@@ -195,6 +228,7 @@ echo "  - clipboard-richtext:  Copy markdown to clipboard as rich text"
 echo "  - daylog:              Reconstruct a past working day or week"
 echo "  - advreview:           Adversarial review by Codex (code changes or a plan)"
 echo "  - visualexplain:       Draw a plan, a change or a subsystem as an HTML page"
+echo "  - projects:            The project tracker in ~/p/projects (plus two hooks)"
 echo ""
 echo "Tools:"
 echo "  - $SCRIPT_DIR/bear_reader.py"

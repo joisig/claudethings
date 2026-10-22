@@ -214,6 +214,11 @@ the shared commits (`git log --oneline <merge base of the two> ^main`).
 A worktree with no commits ahead and a clean tree is neither: it only receives the
 trunk in Step 6.
 
+**Projects.** While each worktree is still on its branch, run
+`/Users/joi/.claude/skills/projects/bin/projects find --repo <worktree dir>` and note
+the project its work belongs to, if any. Step 6 may switch branches, and then the
+match is lost. Keep the list for the final report.
+
 ## Step 3 — ask the user
 
 Show one table: worktree, branch, group, and the one-line reason. Include a row
@@ -453,6 +458,12 @@ on a yes. The `consolidate-*` tags stay local unless the user asks for them to b
 pushed.
 
 ## Final report
+
+**Projects first.** For each consolidated worktree that has a project (noted in
+Step 2), ask the user whether this was the whole project or a chunk of it. Then
+update the project with the `projects` skill: the Work line gets the merged sha from
+the **Merges** section, the items that landed are checked, and a whole project is
+proposed for closing. Do it in one `AskUserQuestion` call for all of them.
 
 When the free runs are done, complete `summary.md` (the **Open** section) and show
 the user the whole of it in the chat, in short form: which worktrees were
