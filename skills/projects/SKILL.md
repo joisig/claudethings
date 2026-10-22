@@ -28,7 +28,8 @@ Always use that absolute path. Commands:
 | `sessions --since D [--repo PATH]` | Claude Code sessions since D: title, transcript, cwds, branches, active time, first and last prompt |
 | `tail ID [-n COUNT]` | Last user and assistant messages of a session |
 | `session-time [ID] [--since "YYYY-MM-DD HH:MM"]` | Active minutes of a session; no ID = this session |
-| `save -m MSG [--resolves SESSION]... FILE...` | Check, render, then commit only FILE... |
+| `fmt [FILE...]` | Put files in the canonical layout (all files when none are given) |
+| `save -m MSG [--resolves SESSION]... FILE...` | fmt, check, render, then commit only FILE... |
 
 ## Rules
 
@@ -56,8 +57,8 @@ overview.md  <theme>/README.md                 generated
 archive/<theme>/...                            done and dropped projects
 ```
 
-- `themes.md`: `## <folder> — <name>`, `Repos:` (main checkouts; worktrees are found
-  with git), `Delegation: on|off`.
+- `themes.md`: `## <folder> — <name>`, then bullets `- Repos:` (main checkouts; worktrees
+  are found with git) and `- Delegation: on|off`, then notes on what each repo is.
 - `people.md`: `## @handle — Name`, then `- Role:`, `- Delegate:`, `- Access:`,
   `- Email:`, `- GitHub:`. Joi is `@joi`.
 - `inbox.md`: things Joi said that have no project yet. Move them out when their
@@ -71,41 +72,50 @@ archive/<theme>/...                            done and dropped projects
 State: active · Re-entry: medium · Created: 2026-10-14 · Touched: 2026-10-22
 
 ## Goal
+
 Two or three lines.
 
 ## Brief
+
 - Where things stand, in one or two bullets.
 - The next move and how to start it (what to read first, what to run).
 - Traps and decisions that are not obvious from the code.
 - Links: plan and handoff documents (absolute paths), notes.md, last session ID.
 
 ## Work
+
 - ~/w/protos · branch joi-session-diag · commit 3f2a9c1 · PR https://github.com/CrankWheel/protos/pull/1234
 
 ## Waiting on others
+
 - [ ] Fix reconnect bug in session-diag
   - Waiting: @rodion since 2026-10-20 · nudge 2026-10-24
   - Thread: https://mail.superhuman.com/...
   - Then: review the PR, run the soak test
 
 ## Ready for me
+
 - [ ] Manual test of Salesforce brand-account switching
   - Size: 30 min · shallow · protos, any worktree
   - Unblocks: @yuliia
 
 ## Later
+
 - [ ] Check 5 days of prod data for the reconnect spike
   - Not before: 2026-10-27
   - Size: 15 min · shallow · no worktree
   - How: run X, look for Y. Good means Z.
 
 ## Backlog
+
 - Idea: per-account diag toggle
 
 ## Done
+
 - [x] Add diag logging (PR #1234, landed 2026-10-18)
 
 ## Log
+
 - 2026-10-22 16:40 · ~70 min (guessed 30) · added the soak-test script; waiting on Rodion
 ```
 
@@ -116,6 +126,13 @@ with ` · `. No YAML frontmatter: a WYSIWYG editor can turn it into a heading on
 The allowed sections are Goal, Brief, Work, Waiting on others, Ready for me, Later,
 Backlog, Done, Log and Notes, in that order. Leave out the ones a project does not
 need.
+
+**Layout.** Joi opens these files in CowCo, a WYSIWYG markdown editor, and its save
+rewrites the layout. So the canonical layout is what it writes: no hard wrapping (one
+line per paragraph and per bullet), a blank line after each heading. `save` applies it
+to the files it commits (`fmt` does it by hand), so CowCo's next save changes almost
+nothing. Write new text that way too. CowCo also escapes `~` as `\~`; the tool reads
+both.
 
 **Keep it scannable.** Joi reads these files in an editor. The Brief is about 5 to 8
 short bullets. Longer context goes in linked files, not in the project file: a plan

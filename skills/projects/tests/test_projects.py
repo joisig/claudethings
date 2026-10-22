@@ -213,6 +213,67 @@ class TestParse(Fixture):
         self.assertEqual(P.parse_size("2 h · deep · no worktree · dev server", "x")["minutes"], 120)
 
 
+class TestFmt(Fixture):
+    def test_unwraps_like_the_editor(self):
+        text = textwrap.dedent("""\
+            # Title
+            State: active · Re-entry: low · Created: 2026-10-01 · Touched: 2026-10-02
+            ## Goal
+            One long
+            paragraph.
+
+            ## Brief
+            - A bullet that
+              wraps.
+            - Second.
+
+            ## Ready for me
+            - [ ] Item
+              - How: run X,
+                then Y.
+              - Size: 5 min · shallow · no worktree
+
+            ```
+            keep
+              this
+            ```
+            | a | b |
+            |---|---|
+            """)
+        out = P.fmt_text(text)
+        self.assertIn("# Title\n\nState: active", out)
+        self.assertIn("## Goal\n\nOne long paragraph.\n", out)
+        self.assertIn("- A bullet that wraps.\n- Second.", out)
+        self.assertIn("  - How: run X, then Y.\n  - Size:", out)
+        self.assertIn("```\nkeep\n  this\n```", out)
+        self.assertIn("| a | b |\n|---|---|", out)
+        self.assertEqual(P.fmt_text(out), out)
+
+    def test_fixture_keeps_its_meaning(self):
+        path = os.path.join(self.root, "crankwheel", "diag.md")
+        before = self.load()[2][0]
+        P.fmt_file(path)
+        after = self.load()[2][0]
+        self.assertEqual([(i.text, i.keys) for i in before.items], [(i.text, i.keys) for i in after.items])
+        self.assertEqual(before.front, after.front)
+
+    def test_themes_as_bullets_and_escaped(self):
+        write(os.path.join(self.root, "themes.md"), f"""
+            ## crankwheel — CrankWheel
+
+            - Repos: {self.repo}
+            - Delegation: on
+
+            ## personal — Personal
+
+            - Repos: \\~/nowhere
+            """)
+        themes = P.load_themes()
+        self.assertEqual(themes["crankwheel"].repos, [self.repo])
+        self.assertTrue(themes["crankwheel"].delegation)
+        self.assertEqual(themes["personal"].repos, [os.path.realpath(os.path.expanduser("~/nowhere"))])
+
+
 class TestValidate(Fixture):
     def errors(self):
         return P.validate(*self.load())

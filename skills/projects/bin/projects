@@ -16,8 +16,9 @@
   projects tail ID [-n COUNT]          The last messages of a session
   projects session-time [ID] [--since TIME]
                                        Active minutes of a session (default: this one)
+  projects fmt [FILE...]               Unwrap lines, blank line after headings (all files by default)
   projects save -m MSG [--resolves ID]... FILE...
-                                       check, render, then commit only FILE... in ~/p/projects
+                                       fmt, check, render, then commit only FILE... in ~/p/projects
   projects hook stop|session-end       Claude Code hooks (read the hook JSON from stdin)
 
 Standard library only. PROJECTS_DIR and PROJECTS_CLAUDE_DIR override ~/p/projects and
@@ -132,7 +133,7 @@ def load_themes():
     themes, cur = {}, None
     with open(path) as f:
         for n, line in enumerate(f, 1):
-            line = line.rstrip("\n")
+            line = clean(line.rstrip("\n"))
             m = re.match(r"^## ([a-z0-9-]+)(?: — (.+))?$", line)
             if m:
                 cur = Theme(m.group(1), m.group(2) or m.group(1))
@@ -142,6 +143,7 @@ def load_themes():
                 raise ParseError(f"themes.md:{n}: a theme heading is '## <folder> — <name>'")
             if cur is None:
                 continue
+            line = re.sub(r"^- ", "", line.strip())
             if line.startswith("Repos:"):
                 cur.repos = [realpath(r.strip()) for r in line[6:].split(",") if r.strip()]
             elif line.startswith("Delegation:"):
@@ -158,6 +160,7 @@ def load_people():
     cur = None
     with open(path) as f:
         for line in f:
+            line = clean(line)
             m = re.match(r"^## (@[a-z0-9_-]+)(?: — (.+))?", line)
             if m:
                 cur = {"name": (m.group(2) or "").strip(), "emails": [], "github": None}
@@ -1173,6 +1176,69 @@ def cmd_session_time(args):
 
 
 # ---------------------------------------------------------------------------
+# fmt: the canonical layout is what a WYSIWYG editor (CowCo) writes on save, so that
+# its saves change almost nothing: no hard wrapping, a blank line after each heading.
+
+LIST_START_RE = re.compile(r"^\s*([-*+]|\d+[.)])\s")
+
+
+def fmt_text(text):
+    out = []
+    in_code = False
+    joinable = False      # may the next non-blank line continue the previous one?
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            in_code = not in_code
+            out.append(line.rstrip())
+            joinable = False
+            continue
+        if in_code:
+            out.append(line)
+            continue
+        if not stripped:
+            out.append("")
+            joinable = False
+        elif line.startswith("#"):
+            out += [line.rstrip(), ""]
+            joinable = False
+        elif stripped.startswith(("|", ">", "<!--")) or stripped in ("---", "***", "___"):
+            out.append(line.rstrip())
+            joinable = False
+        elif LIST_START_RE.match(line) or not joinable:
+            out.append(line.rstrip())
+            joinable = True
+        else:
+            out[-1] = out[-1].rstrip() + " " + stripped
+    text = "\n".join(out)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + "\n"
+
+
+def fmt_file(path):
+    with open(path) as f:
+        old = f.read()
+    new = fmt_text(old)
+    if new != old:
+        with open(path, "w") as f:
+            f.write(new)
+        return True
+    return False
+
+
+def cmd_fmt(args):
+    generated = {os.path.join(PROJECTS_DIR, "overview.md")} | {
+        os.path.join(PROJECTS_DIR, t, "README.md") for t in load_themes()}
+    paths = [os.path.abspath(f) for f in args.files]
+    if not paths:
+        for root, dirs, names in os.walk(PROJECTS_DIR):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "drafts"]
+            paths += [os.path.join(root, n) for n in names if n.endswith(".md")]
+    changed = [rel(p) for p in sorted(paths) if p not in generated and fmt_file(p)]
+    print(f"formatted {len(changed)} file(s)" + "".join(f"\n  {c}" for c in changed))
+
+
+# ---------------------------------------------------------------------------
 # save
 
 
@@ -1208,6 +1274,15 @@ def cmd_save(args):
         if not a.startswith(PROJECTS_DIR + os.sep):
             die(f"{f} is not in {PROJECTS_DIR}")
         files.append(os.path.relpath(a, PROJECTS_DIR))
+    for f in files:
+        full = os.path.join(PROJECTS_DIR, f)
+        if f.endswith(".md") and os.path.isfile(full):
+            fmt_file(full)
+        elif os.path.isdir(full):
+            for root, _, names in os.walk(full):
+                for n in names:
+                    if n.endswith(".md"):
+                        fmt_file(os.path.join(root, n))
     themes, people, projects, errors = load_all()
     errors += validate(themes, people, projects)
     if errors:
@@ -1446,6 +1521,9 @@ def main():
     p.add_argument("id", nargs="?")
     p.add_argument("--since")
     p.set_defaults(fn=cmd_session_time)
+    p = sub.add_parser("fmt")
+    p.add_argument("files", nargs="*")
+    p.set_defaults(fn=cmd_fmt)
     p = sub.add_parser("save")
     p.add_argument("-m", dest="message", required=True)
     p.add_argument("--resolves", action="append")
