@@ -389,6 +389,35 @@ class TestCommands(Fixture):
         self.assertIn("On Joi in delegation themes (crankwheel)", full)
         self.assertIn("      Size:", full)
 
+    def test_priority(self):
+        write(os.path.join(self.root, "crankwheel", "urgent.md"), """
+            # Urgent work
+
+            State: active · Priority: high · Re-entry: low · Created: 2026-10-01 · Touched: 2026-10-01
+
+            ## Ready for me
+
+            - [ ] Zebra task
+              - Size: 20 min · shallow · no worktree
+            """)
+        out = self.run_tool("next").stdout
+        self.assertLess(out.index("Zebra task · high priority"), out.index("Manual test of switching"))
+        out = self.run_tool("fit", "--minutes", "120").stdout
+        self.assertLess(out.index("Zebra task"), out.index("Manual test"))   # before unblocks
+        self.run_tool("render")
+        with open(os.path.join(self.root, "crankwheel", "README.md")) as f:
+            readme = f.read()
+        self.assertIn("[Urgent work](urgent.md) | ready · high priority", readme)
+        self.assertLess(readme.index("Urgent work"), readme.index("Session diagnostics"))
+        with open(os.path.join(self.root, "overview.md")) as f:
+            self.assertIn("**crankwheel/urgent** (ready · high priority", f.read())
+        path = os.path.join(self.root, "crankwheel", "urgent.md")
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace("Priority: high", "Priority: urgent"))
+        self.assertIn("priority is one of", self.run_tool("check", ok=False).stderr)
+
     def test_render(self):
         self.run_tool("render")
         with open(os.path.join(self.root, "crankwheel", "README.md")) as f:

@@ -120,8 +120,13 @@ Two or three lines.
 ```
 
 **Header.** `# Title`, then one line: `State:` (active, paused, done, dropped),
-`Re-entry:` (low, medium, high), `Created:` and `Touched:` (last real work), joined
-with ` · `. No YAML frontmatter: a WYSIWYG editor can turn it into a heading on save.
+optionally `Priority:` (high, low; normal when left out), `Re-entry:` (low, medium,
+high), `Created:` and `Touched:` (last real work), joined with ` · `. No YAML
+frontmatter: a WYSIWYG editor can turn it into a heading on save.
+
+**Priority** is Joi's call: set it only when Joi says so. High-priority projects come
+first in `render`, `next` (ready items) and `fit`, and are marked "high priority";
+low ones come last.
 
 The allowed sections are Goal, Brief, Work, Waiting on others, Ready for me, Later,
 Backlog, Done, Log and Notes, in that order. Leave out the ones a project does not

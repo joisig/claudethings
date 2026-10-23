@@ -53,6 +53,7 @@ ITEM_KEYS = ["Waiting", "Not before", "Due", "Size", "Needs", "Unblocks", "Threa
 STATES = ["active", "paused", "done", "dropped"]
 REENTRY_MINUTES = {"low": 5, "medium": 15, "high": 30}
 REENTRY_LEVELS = ["low", "medium", "high"]
+PRIORITIES = ["high", "normal", "low"]   # optional header key; normal when absent
 ATTENTION = ["shallow", "normal", "deep"]
 STALE_DAYS = 21          # untouched longer than this: re-entry one level higher
 ACTIVE_GAP_MIN = 15      # gaps longer than this do not count as active time
@@ -64,7 +65,8 @@ HANDLE_RE = re.compile(r"@[a-z0-9][a-z0-9_-]*")
 ITEM_RE = re.compile(r"^- \[( |x|X)\] (.+)$")
 KEY_RE = re.compile(r"^- ([A-Z][A-Za-z ]*?):\s*(.*)$")
 MD_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!~|<>])")
-META_KEYS = {"State": "state", "Re-entry": "reentry", "Created": "created", "Touched": "touched"}
+META_KEYS = {"State": "state", "Priority": "priority", "Re-entry": "reentry", "Created": "created",
+             "Touched": "touched"}
 
 
 class ParseError(Exception):
@@ -536,6 +538,20 @@ def touched(p):
         return None
 
 
+def priority(p):
+    return p.front.get("priority", "normal")
+
+
+def priority_rank(p):
+    """0 for high, 1 for normal, 2 for low: sorts high-priority projects first."""
+    return PRIORITIES.index(priority(p)) if priority(p) in PRIORITIES else 1
+
+
+def priority_note(p):
+    """'high priority' or 'low priority'; empty for normal."""
+    return "" if priority(p) == "normal" else f"{priority(p)} priority"
+
+
 def reentry_minutes(p, today):
     level = p.front.get("reentry", "medium")
     idx = REENTRY_LEVELS.index(level) if level in REENTRY_LEVELS else 1
@@ -584,6 +600,8 @@ def validate(themes, people, projects):
             errors.append(f"{where}: state is {p.state}; move it to archive/{p.theme}/")
         if p.front.get("reentry", "medium") not in REENTRY_LEVELS:
             errors.append(f"{where}: reentry is one of {REENTRY_LEVELS}")
+        if priority(p) not in PRIORITIES:
+            errors.append(f"{where}: priority is one of {PRIORITIES}")
         for k in ("created", "touched"):
             try:
                 parse_date(p.front.get(k, ""), f"{where}: {k}")
@@ -661,7 +679,8 @@ def render(themes, projects, today):
     overview = [GENERATED, "", f"# Overview ({today})", ""]
     for key, theme in themes.items():
         ps = sorted([p for p in live if p.theme == key],
-                    key=lambda p: (order.get(status(p, projects, today), 9), next_date(p) or dt.date.max))
+                    key=lambda p: (order.get(status(p, projects, today), 9), priority_rank(p),
+                                   next_date(p) or dt.date.max))
         archived = [p for p in projects if p.archived and p.theme == key]
         lines = [GENERATED, "", f"# {theme.name}", ""]
         if not ps:
@@ -673,7 +692,8 @@ def render(themes, projects, today):
                 nx = first_next(p, projects, today)
                 nd = next_date(p)
                 link = os.path.relpath(p.path, os.path.join(PROJECTS_DIR, key))
-                cells = [f"[{p.front.get('title', p.slug)}]({link})", st,
+                cells = [f"[{p.front.get('title', p.slug)}]({link})",
+                         " · ".join(filter(None, [st, priority_note(p)])),
                          (item_line(nx, p, projects, today) if nx else "").replace("|", "\\|"),
                          str(nd) if nd else "", ", ".join(ball(p))]
                 lines.append("| " + " | ".join(cells) + " |")
@@ -689,7 +709,9 @@ def render(themes, projects, today):
                 nd = next_date(p)
                 with_ = f" · with {', '.join(ball(p))}" if ball(p) else ""
                 when = f" · {nd}" if nd else ""
-                overview.append(f"- **{p.ident}** ({st}{when}{with_}): {item_line(nx, p, projects, today) if nx else '—'}")
+                prio = f" · {priority_note(p)}" if priority_note(p) else ""
+                overview.append(f"- **{p.ident}** ({st}{prio}{when}{with_}): "
+                                f"{item_line(nx, p, projects, today) if nx else '—'}")
             overview.append("")
     with open(os.path.join(PROJECTS_DIR, "overview.md"), "w") as f:
         f.write("\n".join(overview) + "\n")
@@ -776,6 +798,7 @@ def cmd_next(args):
         return
 
     ready = [(p, i) for p in live for i in p.open_items() if actionable(i, projects, today)]
+    ready.sort(key=lambda x: priority_rank(x[0]))
     print(f"\n## Ready for Joi now ({len(ready)})")
     for theme in sorted({p.theme for p, _ in ready}, key=lambda t: list(themes).index(t) if t in themes else 99):
         if not full:
@@ -786,7 +809,8 @@ def cmd_next(args):
             became = ""
             if i.section == "Later":
                 became = "  [was in Later; its Not before is met]"
-            show(p, i, p.slug, [short_size(i), i.unblocks and f"unblocks {', '.join(i.unblocks)}",
+            show(p, i, p.slug, [priority_note(p), short_size(i),
+                                i.unblocks and f"unblocks {', '.join(i.unblocks)}",
                                 i.due and f"due {i.due}", became and "was in Later"], became)
     if not ready:
         print("none")
@@ -860,12 +884,12 @@ def cmd_fit(args):
             if it.not_before and it.not_before[0] == "date":
                 met_days = (today - it.not_before[1]).days
             t = touched(p) or dt.date.min
-            cands.append(((0 if it.unblocks else 1, -met_days, -t.toordinal()), p, it, total))
+            cands.append(((priority_rank(p), 0 if it.unblocks else 1, -met_days, -t.toordinal()), p, it, total))
     cands.sort(key=lambda c: c[0])
     print(f"# Fits in {args.minutes} min (item minutes + re-entry)")
     for _, p, it, total in cands[: args.limit]:
         s = it.size
-        why = []
+        why = [priority_note(p)] if priority_note(p) else []
         if it.unblocks:
             why.append(f"unblocks {', '.join(it.unblocks)}")
         if it.not_before and it.not_before[0] == "date":
