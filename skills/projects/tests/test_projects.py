@@ -131,8 +131,10 @@ class Fixture(unittest.TestCase):
         write(os.path.join(self.root, "crankwheel", "diag.md"), PROJECT.format(**vals))
 
     def run_tool(self, *args, stdin=None, ok=True):
+        # The tests run inside Claude Code sessions too; only self.env may name a session.
+        host = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
         r = subprocess.run(["python3", TOOL, *args], capture_output=True, text=True, input=stdin,
-                           env={**os.environ, **GIT_ENV, **self.env})
+                           env={**host, **GIT_ENV, **self.env})
         if ok and r.returncode != 0:
             raise AssertionError(f"projects {args} failed: {r.stdout}{r.stderr}")
         return r
@@ -378,9 +380,14 @@ class TestCommands(Fixture):
         out = self.run_tool("next").stdout
         self.assertIn("Fix reconnect bug", out.split("## Ready")[0])          # nudge due
         self.assertIn("Manual test of switching", out)
-        self.assertIn("On Joi in delegation themes (crankwheel)", out)
+        self.assertIn("Also on Joi in crankwheel", out)
+        self.assertNotIn("      Size:", out)                               # one line per item
+        self.assertEqual(out.count("Manual test of switching"), 1)          # not listed twice
         later = self.run_tool("next", "--date", d(3)).stdout
-        self.assertIn("Check prod data  [was in Later", later)
+        self.assertIn("Check prod data · 15 min shallow · was in Later", later)
+        full = self.run_tool("next", "--full").stdout
+        self.assertIn("On Joi in delegation themes (crankwheel)", full)
+        self.assertIn("      Size:", full)
 
     def test_render(self):
         self.run_tool("render")
@@ -465,6 +472,40 @@ class TestCommands(Fixture):
         self.run_tool("save", "-m", "diag", "crankwheel/diag.md")
         self.assertEqual(P.read_jsonl(log)[0]["projects"], ["crankwheel/diag"])
         self.assertEqual(P.read_jsonl(log)[0]["session"], "t1")
+
+    def test_session_from_the_environment(self):
+        # Claude Code sets CLAUDE_CODE_SESSION_ID; it wins over the PID walk.
+        sh(self.root, "git", "init", "-q", "-b", "main")
+        self.env["CLAUDE_CODE_SESSION_ID"] = "env1"
+        self.run_tool("save", "-m", "diag", "crankwheel/diag.md")
+        log = os.path.join(self.root, ".git", "projects-handoffs.jsonl")
+        self.assertEqual(P.read_jsonl(log)[0]["session"], "env1")
+
+    def test_no_session_when_ps_is_forbidden(self):
+        # A sandbox (safehouse) refuses to run ps; the lookup gives up instead of crashing.
+        orig_run, orig_env = P.subprocess.run, os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+
+        def forbidden(*a, **kw):
+            raise PermissionError(1, "Operation not permitted", "ps")
+        P.subprocess.run = forbidden
+        try:
+            self.assertIsNone(P.current_session_id())
+        finally:
+            P.subprocess.run = orig_run
+            if orig_env is not None:
+                os.environ["CLAUDE_CODE_SESSION_ID"] = orig_env
+
+    def test_save_says_when_the_tracker_is_read_only(self):
+        sh(self.root, "git", "init", "-q", "-b", "main")
+        gd = os.path.join(self.root, ".git")
+        os.chmod(gd, 0o555)
+        try:
+            r = self.run_tool("save", "-m", "x", "crankwheel/diag.md", ok=False)
+        finally:
+            os.chmod(gd, 0o755)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("read-only here, nothing saved", r.stderr)
+        self.assertIn("--add-dirs", r.stderr)
 
     def test_save_refuses_a_broken_file(self):
         sh(self.root, "git", "init", "-q", "-b", "main")

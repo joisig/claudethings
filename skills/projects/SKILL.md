@@ -20,7 +20,7 @@ Always use that absolute path. Commands:
 |---|---|
 | `render` | Write the generated `overview.md` and `<theme>/README.md` |
 | `check` | Validate every file. `save` runs it too |
-| `next [--date D] [--nudges]` | Actionable items, nudges due, deadlines in 7 days, CrankWheel items on Joi, sessions that ended without a handoff |
+| `next [--date D] [--nudges] [--full]` | One line per item: nudges due, what is ready now (by theme), deadlines in 7 days, CrankWheel items on Joi that become ready within 7 days, sessions that ended without a handoff. `--full` adds every item key and all CrankWheel items on Joi |
 | `fit --minutes N [--attention shallow\|normal\|deep] [--repo PATH]... [--no-worktree] [--limit K]` | Ranked shortlist of items that fit the time |
 | `find [--repo PATH] [--branch B]` | Which project this repo and branch belong to (default: the current directory) |
 | `landed [theme/slug...]` | Has each Work line's commit or PR landed on main/master? |
@@ -305,6 +305,26 @@ as a change, so such a session can get the reminder or a pending record it does 
 need. Dismiss it.
 
 `PROJECTS_HOOKS=off` in the environment turns both off.
+
+## Sandboxes (shclaude)
+
+Joi often runs Claude through a repo's `shclaude` script, which starts it in a
+safehouse sandbox. The sandbox always grants `~/.claude`. The tracker works only when
+the script also grants:
+
+- `$HOME/p/projects` in `--add-dirs` (read/write), for `save` and the hooks' records;
+- `$HOME/p/claudethings` or `$HOME/p` in `--add-dirs-ro`, because
+  `~/.claude/skills/projects` is a symlink into ~/p/claudethings.
+
+The sandbox forbids `ps`. The tool reads this session's ID from
+`CLAUDE_CODE_SESSION_ID`, so it does not need `ps`.
+
+When `save` reports that the tracker is read-only, or the tool cannot be opened, do not
+work around it. Do not tell Joi to run the command with `!`: that runs in the same
+sandbox. Tell Joi which line of that repo's `shclaude` to change. Give the handoff in
+the chat, so a session that has the access can write it later. If the edits are made
+and only the save failed, keep them. Without write access the hooks stay silent, so such
+a session gets no reminder and leaves no pending record.
 
 ## Tests
 

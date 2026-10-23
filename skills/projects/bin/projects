@@ -3,7 +3,9 @@
 
   projects render                      Write overview.md and each theme's README.md
   projects check                       Parse and validate every project file
-  projects next [--date D] [--nudges]  What is actionable, nudges due, deadlines, pending handoffs
+  projects next [--date D] [--nudges] [--full]
+                                       What is actionable, nudges due, deadlines, pending handoffs
+                                       (one line per item; --full adds every item key)
   projects fit --minutes N [--attention A] [--repo PATH]... [--no-worktree] [--limit K]
                                        A ranked shortlist of items that fit the time
   projects find [--repo PATH] [--branch B]
@@ -129,7 +131,7 @@ class Theme:
 def load_themes():
     path = os.path.join(PROJECTS_DIR, "themes.md")
     if not os.path.exists(path):
-        die(f"no themes.md in {PROJECTS_DIR}")
+        die(f"no themes.md in {PROJECTS_DIR}" + ("" if os.path.isdir(PROJECTS_DIR) else SANDBOX_HINT))
     themes, cur = {}, None
     with open(path) as f:
         for n, line in enumerate(f, 1):
@@ -736,53 +738,96 @@ def show_item(p, it, extra=""):
             print(f"      {k}: {it.keys[k]}")
 
 
+def one_line(name, it, extras):
+    """One line per item: `name: text · extra · extra`."""
+    print(" · ".join([f"- {name}: {it.text}"] + [e for e in extras if e]))
+
+
+def short_size(it):
+    return f"{it.size['minutes']} min {it.size['attention']}" if it.size else ""
+
+
+def waiting_note(it):
+    w = it.waiting
+    note = f"{', '.join(w['handles'])} since {w['since']}"
+    return note + (f", nudge {w['nudge']}" if w["nudge"] else "")
+
+
 def cmd_next(args):
     themes, people, projects = load_or_die()
     today = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
     live = [p for p in projects if not p.archived and p.state == "active"]
+    full = args.full
+
+    def show(p, it, name, extras, full_extra=""):
+        if full:
+            show_item(p, it, full_extra)
+        else:
+            one_line(name, it, extras)
 
     nudges = [(p, i) for p in live for i in p.open_items()
               if i.waiting and i.waiting["nudge"] and i.waiting["nudge"] <= today]
     print(f"## Nudges due ({today})")
-    for p, i in nudges or []:
-        show_item(p, i)
+    for p, i in nudges:
+        show(p, i, p.ident, [waiting_note(i)])
     if not nudges:
         print("none")
     if args.nudges:
         return
 
-    print("\n## Ready for Joi now")
     ready = [(p, i) for p in live for i in p.open_items() if actionable(i, projects, today)]
-    for p, i in ready:
-        became = ""
-        if i.section == "Later":
-            became = "  [was in Later; its Not before is met]"
-        show_item(p, i, became)
+    print(f"\n## Ready for Joi now ({len(ready)})")
+    for theme in sorted({p.theme for p, _ in ready}, key=lambda t: list(themes).index(t) if t in themes else 99):
+        if not full:
+            print(f"### {theme}")
+        for p, i in ready:
+            if p.theme != theme:
+                continue
+            became = ""
+            if i.section == "Later":
+                became = "  [was in Later; its Not before is met]"
+            show(p, i, p.slug, [short_size(i), i.unblocks and f"unblocks {', '.join(i.unblocks)}",
+                                i.due and f"due {i.due}", became and "was in Later"], became)
     if not ready:
         print("none")
 
     print("\n## Due within 7 days")
     due = [(p, i) for p in live for i in p.open_items() if i.due and i.due <= today + dt.timedelta(days=7)]
     for p, i in sorted(due, key=lambda x: x[1].due):
-        show_item(p, i, f"  [due {i.due}]")
+        show(p, i, p.ident, [f"due {i.due}"], f"  [due {i.due}]")
     if not due:
         print("none")
 
     deleg = [t.key for t in themes.values() if t.delegation]
     if deleg:
-        print(f"\n## On Joi in delegation themes ({', '.join(deleg)}) — judge which could go to someone else")
+        names = ", ".join(deleg)
         mine = [(p, i) for p in live if p.theme in deleg for i in p.open_items() if not i.waiting]
+        if full:
+            print(f"\n## On Joi in delegation themes ({names}) — judge which could go to someone else")
+        else:
+            # The ready ones are listed above already; of the rest, only what comes up
+            # within 7 days.
+            rest = [(p, i) for p, i in mine if not actionable(i, projects, today)]
+            mine = [(p, i) for p, i in rest if i.not_before and i.not_before[0] == "date"
+                    and i.not_before[1] <= today + dt.timedelta(days=7)]
+            print(f"\n## Also on Joi in {names}, ready within 7 days — with the {names} items above, "
+                  "judge which could go to someone else")
         for p, i in mine:
-            show_item(p, i)
+            nb = i.keys.get("Not before")
+            show(p, i, p.ident, [nb and f"not before {nb}", i.section == "Backlog" and "backlog"])
         if not mine:
             print("none")
+        if not full and len(rest) > len(mine):
+            print(f"({len(rest) - len(mine)} more later or gated; --full lists them)")
 
     pend = read_jsonl(pending_path())
     print("\n## Sessions that ended without a handoff")
     for r in pend:
-        print(f"- {r.get('ended_at', '?')[:16]} {r.get('session')} in {r.get('cwd')} "
-              f"(branches {', '.join(r.get('branches') or []) or '?'}; project {r.get('project') or 'none matched'})")
-        print(f"      transcript: {r.get('transcript')}")
+        print(f"- {r.get('ended_at', '?')[:16]} · {r.get('session')} · {r.get('cwd')} · "
+              f"project {r.get('project') or 'none matched'}")
+        if full:
+            print(f"      branches: {', '.join(r.get('branches') or []) or '?'}")
+            print(f"      transcript: {r.get('transcript')}")
     if not pend:
         print("none")
 
@@ -1139,8 +1184,11 @@ def cmd_tail(args):
 
 
 def current_session_id():
-    """The Claude Code session this process runs under: walk up the parent PIDs to one that
-    ~/.claude/sessions/*.json knows."""
+    """The Claude Code session this process runs under. Claude Code sets
+    CLAUDE_CODE_SESSION_ID; without it, walk up the parent PIDs to one that
+    ~/.claude/sessions/*.json knows. None when that fails: a sandbox can forbid ps."""
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        return os.environ["CLAUDE_CODE_SESSION_ID"]
     by_pid = {}
     for path in glob.glob(os.path.join(CLAUDE_DIR, "sessions", "*.json")):
         try:
@@ -1153,10 +1201,10 @@ def current_session_id():
     for _ in range(30):
         if pid in by_pid:
             return by_pid[pid]
-        r = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
         try:
+            r = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
             pid = int(r.stdout.strip())
-        except ValueError:
+        except (OSError, ValueError):
             return None
         if pid <= 1:
             return None
@@ -1246,6 +1294,21 @@ def git_dir():
     return os.path.join(PROJECTS_DIR, ".git")
 
 
+# Joi runs Claude in safehouse sandboxes (a `shclaude` script per repo). They grant
+# ~/.claude, but ~/p/projects only when the script lists it.
+SANDBOX_HINT = ("\n(In a sandbox? The `shclaude` script that started this session must list "
+                "$HOME/p/projects in --add-dirs, and ~/p/claudethings or ~/p in --add-dirs-ro.)")
+
+
+def tracker_writable():
+    try:
+        with tempfile.TemporaryFile(dir=git_dir()):
+            pass
+        return True
+    except OSError:
+        return False
+
+
 def tracker_lock(timeout):
     """The lock that save and the SessionEnd hook share, or None after timeout seconds.
     Released when the process ends."""
@@ -1264,7 +1327,9 @@ def tracker_lock(timeout):
 
 def cmd_save(args):
     if not os.path.isdir(git_dir()):
-        die(f"{PROJECTS_DIR} is not a git repo")
+        die(f"{PROJECTS_DIR} is not a git repo" + SANDBOX_HINT)
+    if not tracker_writable():
+        die(f"{PROJECTS_DIR} is read-only here, nothing saved" + SANDBOX_HINT)
     lock = tracker_lock(30)
     if lock is None:
         die("another save holds the lock for more than 30 seconds")
@@ -1490,6 +1555,7 @@ def main():
     p = sub.add_parser("next")
     p.add_argument("--date")
     p.add_argument("--nudges", action="store_true")
+    p.add_argument("--full", action="store_true")
     p.set_defaults(fn=cmd_next)
     p = sub.add_parser("fit")
     p.add_argument("--minutes", type=int, required=True)

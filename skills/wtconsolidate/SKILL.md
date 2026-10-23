@@ -115,6 +115,7 @@ The sections:
 | **Changes by theme** | Step 8 | The overview, and the range it covers |
 | **Automated tests** | Steps 5 and 10, as results arrive | What ran, on which commit, the result, where the log is |
 | **Manual tests** | Step 8 and "Recording manual results" | What the user reported |
+| **Addendum** | Step 8 point 4, and any later commit the user adds to this consolidation | Each commit after `consolidate-end-N` (kill switches, late fixes): what it does, its tests, the result. The end tag does not move |
 | **Open** | the end | Failing tests, worktrees left out, runs not approved, themes not tested yet |
 
 ### test-log.jsonl
@@ -373,11 +374,21 @@ conflict). Then one line that says which files.
      **last aligned** commit, the last moment the trunk and the worktrees were
      the same. Say which base you used and its date. If it looks too old (one
      neglected worktree can pull it back), ask the user for a better one.
-4. Ask which of the themes the user remembers testing already, and how far
+4. **Kill switches.** Check each theme against the kill-switch criteria of the
+   repository (bboo: "Kill switches" in `TEST_PLAN_GUIDELINES.md`). For each theme
+   that qualifies and has no switch yet, say why and recommend yes or no. Then ask
+   which switches to add (`AskUserQuestion`, multi-select). Build the ones the user
+   picks as that section says, one commit each, under the trunk's commit rule. Run
+   the test files they touch. The commits come after the end tag, so record them
+   in an **Addendum** section of `summary.md`; the end tag stays where it is. Name
+   every new switch, and every existing switch that covers a theme, in that
+   theme's line of **Changes by theme** and in the Setup list of the Step 9 plan.
+   When no theme qualifies, say so in one line.
+5. Ask which of the themes the user remembers testing already, and how far
    (`AskUserQuestion`, multi-select, plus free text). Work that was tested before
    a conflict resolution or a collision fix touched it counts as not tested for
    that part.
-5. Write the **Changes by theme** section of `summary.md`. Now that the themes
+6. Write the **Changes by theme** section of `summary.md`. Now that the themes
    are named, append the `mix precommit` result to `test-log.jsonl`, one
    `automated` line per theme, with the HEAD it ran on. Append one
    `manual-before-merge` line to `test-log.jsonl` for each theme the user says
@@ -560,4 +571,5 @@ CLAUDE.md and the project memory before you start, and ask for what is missing.
 | Whether the trunk is protected (commits on it need the user's OK) | Steps 5 and 6 |
 | How to keep the tests off a shared test database, if there is one | Steps 1, 5 and 10 |
 | Collisions that this repository is known for | Step 5, point 6 |
+| How the repository turns off a feature without a deploy, and when a change needs that (bboo: Whiteboard, "Kill switches" in `TEST_PLAN_GUIDELINES.md`). If it has no such mechanism, skip Step 8 point 4 and say so | Step 8, point 4 |
 | How the dev server is started, and for which user, for browser QA | Step 10 |
