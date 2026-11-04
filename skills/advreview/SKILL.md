@@ -73,6 +73,28 @@ the reviewer lacks our context and can be wrong. Then, for each point:
 Use `AskUserQuestion` for the questions and tradeoffs. Group them in one call when
 you can.
 
+### Flags
+
+The review ends with a "Flags" section, separate from the findings. A flag is not a
+defect. It marks something the user must know about even when the code is correct: a
+new dependency (and a copyleft or incompatible license), a compliance or privacy
+question, a new outbound data flow, a security-sensitive surface, a destructive or bulk
+data operation, a migration that is not backwards compatible or a new database
+trigger, a silent change to production behavior, a change that needs an operations
+action, a wire-protocol or data-format change, money paths, or a widening of what an
+agent or automation may do without asking. `FLAGS_PROMPT` in `bin/advreview` has the
+exact list. In code reviews the section sits in the summary text above the review
+comments. If it is missing, the reviewer did not do the flag check: do the check
+yourself against the list, and say that you did.
+
+- Do not fix, dismiss or judge away a flag. Check only that it is real (the work
+  actually introduces it); drop one that is not, and say so in one line.
+- Add a flag that the reviewer missed if you notice one while you check the findings.
+  The project's instructions can name more flag categories for that repository (the
+  reviewer does not read CLAUDE.md); check for those yourself.
+- Flags do not stop your work and do not call for a question to the user. They are
+  for the user's awareness.
+
 ## Step 4 — code reviews repeat until clean
 
 This step is for code reviews (`uncommitted` and `base`). A plan review runs once.
@@ -88,6 +110,10 @@ these:
 - wrong (the reviewer lacks context, or is simply mistaken);
 - about a tradeoff or decision that is already made, by the user or with the user.
 
+Flags do not count against a clean review, and they never cause another round. Each
+round is context free, so the same flags come back; keep one combined list over all
+rounds.
+
 Run at most 5 reviews. If the fifth is still not clean, stop. Tell the user what is
 still open and what kept coming back, and decide together what to do.
 
@@ -96,9 +122,14 @@ answer if it led to a code change.
 
 ## Step 5 — report
 
-Tell the user briefly: how many reviews ran, what the reviewer found, what you
+If there are flags, put them first in the report, under a "Flags" heading, one line
+each with the file. Do not tell the user the work is ready, done or safe to ship in a
+message that does not show the flags; when the flags come before the "ready" message,
+repeat them there.
+
+Then tell the user briefly: how many reviews ran, what the reviewer found, what you
 changed, what you did not change and why. For a plan, update the plan file before you
-show it.
+show it, and add the flags to its open points.
 
 ## When it cannot run
 

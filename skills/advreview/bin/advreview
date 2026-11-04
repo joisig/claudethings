@@ -28,11 +28,17 @@ START_HINT="Start it outside the sandbox: ~/.claude/skills/advreview/bin/advrevi
 # The caller already ran the tests, and the Codex sandbox often cannot run them anyway.
 NO_TESTS='Do not run tests or builds; the author runs them separately.'
 
-PLAN_PROMPT="Do an adversarial review of the plan document at the path below. Check its claims against the code in this repository. Report concrete problems: wrong assumptions, missing cases, risks, steps that will not work as written, and places where a simpler approach would do. Do not change any files. $NO_TESTS Plan document: "
+# Flags are not defects. They mark changes that need the human's attention even when the
+# code is correct. The skill (SKILL.md, "Flags") says how Claude handles them.
+# `codex exec review` answers in a fixed format (findings plus an overall explanation),
+# so the flags must go into the explanation text; they appear above "Review comment:".
+FLAGS_PROMPT='Separately from the findings, end your review with a section titled "Flags". If your output has a fixed format, put this section at the end of its overall explanation text, never as a finding. Flags are not defects; they mark things a human must know about even when the code is correct. List each of these that the work introduces, with the file and one line on why, or write "Flags: none". (1) A new dependency: library, package, external service or tool; say so if its license is copyleft (GPL, AGPL and similar) or otherwise incompatible. (2) A compliance or privacy question. (3) A new outbound data flow to a third party, or a new category of user data sent to an existing one. (4) A security-sensitive surface: authentication, authorization or permission checks, crypto, secrets or tokens, unescaped output, a security check that is disabled or skipped. (5) A destructive or bulk data operation: permanent deletes, erase paths, anything that removes data irreversibly. (6) A database migration that is not backwards compatible or that destroys data, or a new database trigger. (7) A silent change to production behavior: a changed default, or a flag or mode flip that takes effect without an explicit action. (8) An infrastructure or deploy change that needs an operations action: a new environment variable, a restart, server, OS, proxy or service-manager configuration. (9) A change to a wire protocol, a persisted data format or a public contract that can break clients or data already in the field. (10) Billing, payment or pricing logic. (11) A widening of what an agent or automation may do without asking a human: hooks, permission allowlists, sandbox exceptions, CI workflows or their secrets.'
+
+PLAN_PROMPT="Do an adversarial review of the plan document at the path below. Check its claims against the code in this repository. Report concrete problems: wrong assumptions, missing cases, risks, steps that will not work as written, and places where a simpler approach would do. Do not change any files. $NO_TESTS For the Flags, list what the plan would introduce. $FLAGS_PROMPT Plan document: "
 
 # Codex refuses custom instructions together with --uncommitted or --base, so these are
-# its own built-in target prompts for those modes, plus NO_TESTS.
-UNCOMMITTED_PROMPT="Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings. $NO_TESTS"
+# its own built-in target prompts for those modes, plus NO_TESTS and FLAGS_PROMPT.
+UNCOMMITTED_PROMPT="Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings. $NO_TESTS $FLAGS_PROMPT"
 
 die() { echo "advreview: $*" >&2; exit 2; }
 
@@ -121,7 +127,7 @@ run() {
 
   case "$mode" in
     uncommitted) codex exec review -m "$model" -o "$final" "$UNCOMMITTED_PROMPT" > "$log" 2>&1 ;;
-    base)        codex exec review -m "$model" -o "$final" "Review the code changes against the base branch '$arg'. The merge base commit for this comparison is $base_sha. Run \`git diff $base_sha\` to inspect the changes relative to $arg. Provide prioritized, actionable findings. $NO_TESTS" > "$log" 2>&1 ;;
+    base)        codex exec review -m "$model" -o "$final" "Review the code changes against the base branch '$arg'. The merge base commit for this comparison is $base_sha. Run \`git diff $base_sha\` to inspect the changes relative to $arg. Provide prioritized, actionable findings. $NO_TESTS $FLAGS_PROMPT" > "$log" 2>&1 ;;
     plan)        codex exec -m "$model" -s read-only -o "$final" "$PLAN_PROMPT$arg" > "$log" 2>&1 ;;
   esac
   status=$?
