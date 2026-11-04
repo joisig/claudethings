@@ -29,3 +29,7 @@
 - **"Changes Made Plus Feedback":** when I leave TODOR comments in a plan, or I give feedback on a plan myself (in chat or any other way), write a new version of the plan and add a section "Changes Made Plus Feedback" at the end. It contains a summary of the changes you made and any feedback of your own. There can be multiple rounds of such sections at the end of a complex plan document that needs many rounds of reviews, but you can summarize previous rounds before starting the next section. Feedback from the automatic `advreview` does not call for this section.
 - For a checked-in, long-lived design document, do not leave that section in the file. Put open points in the body where they belong, and give the summary in chat.
 - When I ask you to open a file in my editor (the Ctrl+G editor), run `"$EDITOR" <file>` in the background with the file's **absolute path**. The editor proxy does not resolve relative paths.
+
+## Word documents in Icelandic
+
+- When you generate a Word document (.docx) whose text is in Icelandic, set the document language to Icelandic (`is-IS`) so Word proofs it as Icelandic: `<w:lang w:val="is-IS"/>` in the `docDefaults` run properties in `styles.xml`, and in any style or run that sets its own `w:lang`. Also set `<dc:language>is-IS</dc:language>` in `docProps/core.xml`.
