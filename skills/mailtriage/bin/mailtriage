@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""mailtriage - the helper behind the mailtriage skill (CrankWheel inbox <-> project tracker).
+
+  mailtriage snapshot --threads FILE... --tracked FILE... --reminders FILE...
+                      [--account A] [--today D] [--weeks N] [--stale-days N]
+                      [--projects PATH] [--json]
+
+--threads: the list_threads pages of the splits. --tracked: ALL pages of
+list_threads(labels=["ptracked"]). --reminders: ALL pages of list_reminders(status=active).
+The last two must be complete (a file with an empty list is fine): the snapshot reads "not
+in them" as "no label" and "no reminder".
+
+Joins these Superhuman MCP results (as the JSON files the MCP saves or that the skill writes) with `projects threads --json`, and prints one
+compact snapshot: one row per thread, with its kind, its tracker entries and its gap flags.
+The model reads the snapshot, never the raw pages.
+
+Missing data is "unknown", never "no": a thread that is in the tracker but in none of the
+inputs (not in the inbox, not labelled, no reminder) gets the flag `state-unknown`, and the
+skill looks it up with get_thread.
+
+Standard library only. Fails fast on input it does not understand.
+"""
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import subprocess
+import sys
+
+PROJECTS_TOOL = os.path.expanduser("~/.claude/skills/projects/bin/projects")
+TRACK_LABEL = "ptracked"
+HANDOFF_PREFIX = "Send the hand-off to "            # the item text of a delegation not yet sent
+CRON_LABELS = ("cwinvoices", "lx-drafted")
+SCOPE_SPLITS = ("Important", "Other")              # Dv and the other splits are out of scope       # owned by Klói's invoice and link-exchange crons
+JOI_RE = re.compile(r"^joi(\+[^@]*)?@crankwheel\.com$|^joi@joisig\.com$|^info@emailmeapp\.net$", re.I)
+AUTOMATED_RE = re.compile(
+    r"no-?reply|notifications?@|notification@|mailer-daemon|calendar-notification|@.*zendesk\.com"
+    r"|^info@crankwheel\.com$|^support@crankwheel\.com$|^billing@|^alerts?@|^bot@|^news(letter)?@"
+    r"|^subscriptions@|^emailer@|^confirm@|^tam-team@", re.I)
+KLOI_SUBJECT_RE = re.compile(r"^(Klói:|Other split digest|Invoice triage|Link-exchange)", re.I)
+
+
+def die(msg):
+    print(f"mailtriage: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        die(f"cannot read {path}: {e}")
+
+
+def addr(s):
+    """The bare address of 'Name <a@b>' or 'a@b'."""
+    m = re.search(r"<([^>]+)>", s or "")
+    return (m.group(1) if m else (s or "")).strip().lower()
+
+
+def to_date(ts):
+    return dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+
+
+def kind_of(t, labels):
+    splits = t.get("splits") or []
+    if splits and not any(sp in SCOPE_SPLITS for sp in splits):
+        return "out-of-scope"
+    if any(l in labels for l in CRON_LABELS):
+        return "cron-owned"
+    last = t["messages"][-1] if t.get("messages") else {}
+    sender = addr(last.get("from", ""))
+    subject = t.get("subject") or ""
+    if JOI_RE.match(sender) and KLOI_SUBJECT_RE.match(subject):
+        return "kloi-digest"
+    if sender == "calendar-notification@google.com":
+        return "calendar-tickler"
+    people = {addr(p) for p in t.get("participants", [])}
+    if people and all(JOI_RE.match(p) for p in people):
+        return "note-to-self"
+    if AUTOMATED_RE.search(sender):
+        return "automated"
+    return "person"
+
+
+def load_threads(paths):
+    threads = {}
+    for p in paths:
+        data = load_json(p)
+        if not isinstance(data, dict) or "threads" not in data:
+            die(f"{p}: not a list_threads result (no 'threads')")
+        for t in data["threads"]:
+            if "thread_id" not in t:
+                die(f"{p}: a thread without thread_id")
+            threads[t["thread_id"]] = t
+    return threads
+
+
+def load_reminders(paths):
+    out = {}
+    for p in paths:
+        data = load_json(p)
+        if not isinstance(data, dict) or "reminders" not in data:
+            die(f"{p}: not a list_reminders result (no 'reminders')")
+        for r in data["reminders"]:
+            if r.get("status", "active") != "active":
+                continue
+            prev = out.get(r["thread_id"])
+            if prev is None or r["remind_at"] < prev["remind_at"]:
+                out[r["thread_id"]] = r
+    return out
+
+
+def load_tracker(projects_tool):
+    r = subprocess.run([projects_tool, "threads", "--json"], capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"projects threads failed: {r.stderr.strip()}")
+    return json.loads(r.stdout)
+
+
+def build(threads, tracked, reminders, tracker, account, today, weeks, stale_days):
+    horizon = today + dt.timedelta(weeks=weeks)
+    entries = {}
+    for e in tracker:
+        if e["account"] in (account, "unknown"):
+            entries.setdefault(e["thread"], []).append(e)
+    rows = []
+    ids = list(threads) + [i for i in reminders if i not in threads] + \
+        [i for i in entries if i not in threads and i not in reminders]
+    for tid in ids:
+        t = threads.get(tid)
+        rem = reminders.get(tid)
+        ents = entries.get(tid, [])
+        open_ents = [e for e in ents if e["open"]]
+        row = {"thread": tid, "entries": ents, "flags": []}
+        if t:
+            # Thread labels can be partial (a thread whose last message Joi sent lacks INBOX);
+            # take the union with the messages' labels. Split membership means "in the inbox".
+            labels = sorted(set(t.get("labels", [])).union(*(m.get("labels", []) for m in t.get("messages", []))))
+            last = t["messages"][-1] if t.get("messages") else {}
+            last_date = to_date(t["last_message_at"])
+            row.update({
+                "known": True,
+                "subject": t.get("subject") or "",
+                "last_message_id": t.get("last_message_id"),
+                "in_inbox": "INBOX" in labels or bool(t.get("splits")),
+                "split": ",".join(t.get("splits", [])) or "-",
+                "last_date": last_date.isoformat(),
+                "age_days": (today - last_date).days,
+                "messages": t.get("message_count"),
+                "last_from": addr(last.get("from", "")),
+                "joi_last": bool(JOI_RE.match(addr(last.get("from", "")))),
+                "tracked_label": TRACK_LABEL in labels or tid in tracked,
+                "labels": [l for l in labels if l in (TRACK_LABEL, *CRON_LABELS)],
+                "kind": kind_of(t, labels),
+            })
+        else:
+            row.update({"known": False, "subject": rem["subject"] if rem else "", "kind": "unknown",
+                        "in_inbox": None, "tracked_label": tid in tracked})
+        row["reminder"] = to_date(rem["remind_at"]).isoformat() if rem else None
+        row["reminder_id"] = rem["reminder_id"] if rem else None
+        flags = row["flags"]
+        row["item_date"] = None
+        if row.get("kind") == "out-of-scope":
+            continue                    # another split (Dv): not part of the snapshot at all
+        if row.get("kind") == "cron-owned":
+            rows.append(row)            # Klói's crons own these: counted, never flagged
+            continue
+        if any(e["entry"].startswith(HANDOFF_PREFIX) for e in open_ents):
+            flags.append("handoff-pending")     # sweep checks the thread for Joi's sent message
+        if any(e["account"] == "unknown" for e in ents):
+            flags.append("account-unknown")
+        if not row["known"] and not rem:
+            flags.append("state-unknown")       # a reminder means: out of the inbox until then
+        if rem and rem["thread_id"].startswith("draft"):
+            flags.append("broken-reminder")
+        if row["in_inbox"] and row.get("kind") not in ("cron-owned",):
+            if row["tracked_label"] or open_ents:
+                flags.append("tracked-in-inbox")
+            elif not row["joi_last"] and row["age_days"] > stale_days and row["kind"] == "person":
+                flags.append("stale")
+        if rem and to_date(rem["remind_at"]) <= horizon and not open_ents and "broken-reminder" not in flags:
+            flags.append("reminder-untracked")
+        if row["tracked_label"] and not open_ents:
+            flags.append("label-without-entry")
+        if open_ents and not row["tracked_label"]:
+            flags.append("entry-without-label")
+        dates = sorted(e["remind"] for e in open_ents if e["remind"])
+        row["item_date"] = dates[0] if dates else None
+        if rem and dates and row["reminder"] != dates[0]:
+            flags.append("date-mismatch")
+        if open_ents and not rem and row["in_inbox"] is False and dates:
+            flags.append("archived-no-reminder")
+        rows.append(row)
+    return rows
+
+
+def short(s, n):
+    s = s or ""
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def print_text(rows, today, weeks):
+    def ents(r):
+        return "; ".join(f"{e['project']}:{e['section']}{'' if e['open'] else '(done)'}"
+                         + (f"@{e['remind']}" if e["remind"] else "") for e in r["entries"]) or "-"
+
+    groups = [
+        ("INBOX", [r for r in rows if r["in_inbox"]]),
+        (f"REMINDERS (not in inbox, due by {today + dt.timedelta(weeks=weeks)})",
+         [r for r in rows if not r["in_inbox"] and r["reminder"]
+          and dt.date.fromisoformat(r["reminder"]) <= today + dt.timedelta(weeks=weeks)]),
+        ("TRACKED, NOT IN INBOX, NO REMINDER", [r for r in rows if r["in_inbox"] is False and not r["reminder"]]),
+        ("UNKNOWN STATE (look up with get_thread)", [r for r in rows if not r["known"] and not r["reminder"]]),
+    ]
+    shown = {r["thread"] for _, rs in groups for r in rs}
+    groups.append(("OTHER FLAGGED", [r for r in rows if r["flags"] and r["thread"] not in shown]))
+    for title, rs in groups:
+        print(f"## {title}: {len(rs)}")
+        for r in rs:
+            cols = [r["thread"], r.get("kind", "?"), r.get("split", "-"), r.get("last_date", "-"),
+                    f"{r.get('messages', '-')}m", ("joi" if r.get("joi_last") else short(r.get("last_from"), 28)),
+                    f"rem {r['reminder']}" if r["reminder"] else "-", ents(r),
+                    ",".join(r["flags"]) or "-", short(r["subject"], 70)]
+            print("\t".join(str(c) for c in cols))
+        print()
+    counts = {}
+    for r in rows:
+        for f in r["flags"]:
+            counts[f] = counts.get(f, 0) + 1
+    print("## FLAGS: " + (", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "none"))
+
+
+def cmd_snapshot(args):
+    today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    tracked = load_threads(args.tracked)
+    threads = {**tracked, **load_threads(args.threads)}
+    reminders = load_reminders(args.reminders)
+    tracker = load_tracker(args.projects)
+    rows = build(threads, set(tracked), reminders, tracker, args.account, today, args.weeks, args.stale_days)
+    if args.json:
+        print(json.dumps(rows, indent=1, ensure_ascii=False))
+    else:
+        print_text(rows, today, args.weeks)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="mailtriage")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("snapshot")
+    p.add_argument("--threads", nargs="+", required=True, help="list_threads result files")
+    p.add_argument("--tracked", nargs="+", required=True,
+                   help="all list_threads(labels=[ptracked]) result files")
+    p.add_argument("--reminders", nargs="+", required=True,
+                   help="all list_reminders(status=active) result files")
+    p.add_argument("--account", default="joi@crankwheel.com")
+    p.add_argument("--today")
+    p.add_argument("--weeks", type=int, default=6)
+    p.add_argument("--stale-days", type=int, default=7)
+    p.add_argument("--projects", default=PROJECTS_TOOL, help="path of the projects tool")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_snapshot)
+    args = ap.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()

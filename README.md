@@ -14,6 +14,7 @@ matching permissions to `~/.claude/settings.json`.
 | `visualexplain` | Draw a plan, a code change or a subsystem as a local HTML page on a pan-and-zoom canvas |
 | `wtconsolidate` | Merge finished work from a repo's parallel worktrees into main, then write a test plan (linked into bboo only) |
 | `projects` | My project tracker in `~/p/projects`: briefs, to-dos, waits on people, what fits the time I have |
+| `mailtriage` | Triage the CrankWheel inbox and upcoming Superhuman reminders into the project tracker |
 
 `daylog` combines Google Calendar and sent mail (via `gog`), git commits across
 my repos, GitHub activity, and my Bear WPlan/DPlan notes. Repos and accounts are
@@ -52,6 +53,13 @@ or PRs landed, lists Claude Code sessions, and is the only thing that commits th
 project handoff after real work in a theme's repo) and SessionEnd (records sessions
 that ended without one). `PROJECTS_HOOKS=off` turns them off. Tests:
 `python3 -m unittest discover skills/projects/tests`.
+
+`mailtriage` walks the CrankWheel inbox (Superhuman Important and Other splits) and the
+reminders due within 6 weeks with me, card by card, and files what is more than a quick
+reply into `~/p/projects` (`/mailtriage sweep` only looks for gaps). All mail changes go
+through the Superhuman MCP, after my confirmation; it never sends. Its helper
+`skills/mailtriage/bin/mailtriage snapshot` joins the MCP results with
+`projects threads --json`. Tests: `python3 -m unittest discover skills/mailtriage/tests`.
 
 `global/CLAUDE.md` is my global instructions file. `install.sh` links it to
 `~/.claude/CLAUDE.md`. `commands/commit.md` is my `/commit` command, linked to

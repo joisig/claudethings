@@ -23,6 +23,7 @@ Always use that absolute path. Commands:
 | `next [--date D] [--nudges] [--full]` | One line per item: nudges due, what is ready now (by theme), deadlines in 7 days, CrankWheel items on Joi that become ready within 7 days, sessions that ended without a handoff. `--full` adds every item key and all CrankWheel items on Joi |
 | `fit --minutes N [--attention shallow\|normal\|deep] [--repo PATH]... [--no-worktree] [--limit K]` | Ranked shortlist of items that fit the time |
 | `find [--repo PATH] [--branch B]` | Which project this repo and branch belong to (default: the current directory) |
+| `threads [--json] [--theme T]` | Every mail thread the tracker links to: one row per entry (item, Brief or Backlog line, `inbox.md` line), with account, open or done, and the reminder date. The `mailtriage` skill reconciles the inbox against it |
 | `landed [theme/slug...]` | Has each Work line's commit or PR landed on main/master? |
 | `landed --repo PATH (--commit SHA \| --branch B) [--pr URL]` | The same, ad hoc |
 | `sessions --since D [--repo PATH]` | Claude Code sessions since D: title, transcript, cwds, branches, active time, first and last prompt |
@@ -45,7 +46,9 @@ Always use that absolute path. Commands:
 - Name projects as `theme/slug`. When Joi's name for a project matches more than one,
   ask.
 - Everything here stays on this laptop, so detail is fine. Link email as Superhuman
-  thread links, not message IDs.
+  thread links, not message IDs, with the account in the link
+  (`https://mail.superhuman.com/<account>/thread/<id>`). Superhuman and Gmail share
+  thread IDs.
 
 ## Files
 
@@ -159,7 +162,7 @@ markdown editors add on save (`\~`, `&gt;`).
 | `Size:` | `<N> min · <deep\|normal\|shallow> · <place>[ · dev server][ · prod]` |
 | `Needs:` | access or people, e.g. `@birta or @fridfinnur`, `source access`, `cwstaging deploy` |
 | `Unblocks:` | handles of people waiting for this item |
-| `Thread:` | Superhuman thread link |
+| `Thread:` | Superhuman thread link; several are separated by ` · ` (a key cannot repeat) |
 | `PR:` | PR URL |
 | `How:` | for a wait: exactly what to check when the wait ends, and what good looks like |
 | `Then:` | what follows once it is done |

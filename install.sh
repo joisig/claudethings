@@ -43,11 +43,11 @@ for skill in bear-notes clipboard-markdown clipboard-richtext checkscreenshot sh
     echo "  $skill -> $skill_dir/SKILL.md"
 done
 
-# daylog, advreview, visualexplain and projects ship more than a SKILL.md (bin/, for
+# daylog, advreview, visualexplain, projects and mailtriage ship more than a SKILL.md (bin/, for
 # daylog config.sh and reference/, for visualexplain the canvas shell), so the whole
 # directory is linked rather than the single file.
 chmod +x "$SCRIPT_DIR/skills/advreview/bin/advreview-listen"
-for skill in daylog advreview visualexplain projects; do
+for skill in daylog advreview visualexplain projects mailtriage; do
     chmod +x "$SCRIPT_DIR/skills/$skill/bin/$skill"
     skill_dir="$CLAUDE_DIR/skills/$skill"
     [ -L "$skill_dir" ] && rm -f "$skill_dir"

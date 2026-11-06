@@ -10,6 +10,8 @@
                                        A ranked shortlist of items that fit the time
   projects find [--repo PATH] [--branch B]
                                        Projects whose Work lines match a repo (and branch)
+  projects threads [--json] [--theme T]
+                                       The mail threads the tracker links to, one row per entry
   projects landed [theme/slug...]      Has the recorded work landed on main/master?
   projects landed --repo PATH (--commit SHA | --branch B) [--pr URL]
                                        The same, ad hoc, for work with no project file
@@ -40,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 PROJECTS_DIR = os.path.expanduser(os.environ.get("PROJECTS_DIR", "~/p/projects"))
 CLAUDE_DIR = os.path.expanduser(os.environ.get("PROJECTS_CLAUDE_DIR", "~/.claude"))
@@ -940,6 +943,124 @@ def cmd_find(args):
         print("no project matches")
 
 
+# ---------------------------------------------------------------------------
+# threads: the mail threads that the tracker links to (mailtriage reconciles against these)
+
+SUPERHUMAN_RE = re.compile(r"https://mail\.superhuman\.com/(\S*?)thread/([0-9A-Za-z]+)")
+GMAIL_RE = re.compile(r"https://mail\.google\.com/mail/(\S*?)#\S*?/([0-9A-Fa-f]{16})(?![0-9A-Za-z])")
+
+
+def thread_links(text):
+    """[(thread id, account or None)] for the Superhuman and Gmail thread links in text.
+    Superhuman and Gmail share thread IDs. A link that names no account gives None."""
+    out = []
+    for m in SUPERHUMAN_RE.finditer(text):
+        first = urllib.parse.unquote(m.group(1).split("/")[0])
+        out.append((m.group(2), first if "@" in first else None))
+    for m in GMAIL_RE.finditer(text):
+        prefix = urllib.parse.unquote(m.group(1))
+        acct = re.search(r"authuser=([^&#\s]+@[^&#\s]+)", prefix) or re.search(r"u/([^/\s]+@[^/\s]+)", prefix)
+        out.append((m.group(2), acct.group(1) if acct else None))
+    return out
+
+
+def minus_working_days(day, n):
+    while n > 0:
+        day -= dt.timedelta(days=1)
+        if day.weekday() < 5:
+            n -= 1
+    return day
+
+
+def remind_date(item):
+    """The date a thread reminder for this item falls on (mailtriage's 'Dates' rule): the earliest
+    dated Not before or nudge; else 2 working days before Due; else None (a gate is not a date)."""
+    dates = []
+    if item.not_before and item.not_before[0] == "date":
+        dates.append(item.not_before[1])
+    if item.waiting and item.waiting["nudge"]:
+        dates.append(item.waiting["nudge"])
+    if dates:
+        return min(dates)
+    if item.due:
+        return minus_working_days(item.due, 2)
+    return None
+
+
+def thread_rows(projects):
+    """One row per (thread, tracker entry). An entry is an item, or a line outside the items
+    (Brief, Backlog, Notes, ...) of a project, or a line of inbox.md."""
+    rows = []
+
+    def add(links, **row):
+        seen = set()
+        for tid, acct in links:
+            if tid in seen:
+                continue
+            seen.add(tid)
+            rows.append({"thread": tid, "account": acct or "unknown", **row})
+
+    for p in projects:
+        live = not p.archived and p.state in ("active", "paused")
+        base = {"project": p.ident, "file": rel(p.path)}
+        for it in p.items:
+            text = " ".join([it.text, *it.keys.values()])
+            nb = it.not_before
+            add(thread_links(text), **base, section=it.section, line=it.line, entry=it.text,
+                open=live and not it.checked and it.section in OPEN_SECTIONS,
+                not_before=nb[1].isoformat() if nb and nb[0] == "date" else None,
+                gate=(f"after {nb[1]}" + (f": {nb[2]}" if nb[2] else "") if nb[0] == "after" else nb[1])
+                if nb and nb[0] != "date" else None,
+                nudge=it.waiting["nudge"].isoformat() if it.waiting and it.waiting["nudge"] else None,
+                due=it.due.isoformat() if it.due else None,
+                waiting=it.waiting["handles"] if it.waiting else [],
+                remind=remind_date(it).isoformat() if remind_date(it) else None)
+        for name, lines in p.sections.items():
+            if name in ITEM_SECTIONS:
+                continue
+            for ln, line in lines:
+                links = thread_links(line)
+                if links:
+                    add(links, **base, section=name, line=ln, entry=re.sub(r"^\s*- ", "", line).strip(),
+                        open=live and name != "Log", not_before=None, gate=None, nudge=None, due=None,
+                        waiting=[], remind=None)
+    path = os.path.join(PROJECTS_DIR, "inbox.md")
+    if os.path.exists(path):
+        heading = ""
+        with open(path) as f:
+            for ln, line in enumerate(f, 1):
+                line = clean(line.rstrip("\n"))
+                if line.startswith("## "):
+                    heading = line[3:].strip()
+                    continue
+                links = thread_links(line)
+                if links:
+                    add(links, project="inbox", file="inbox.md", section=heading, line=ln,
+                        entry=re.sub(r"^\s*- ", "", line).strip(), open=True, not_before=None,
+                        gate=None, nudge=None, due=None, waiting=[], remind=None)
+    return rows
+
+
+def cmd_threads(args):
+    themes, people, projects = load_or_die()
+    if args.theme:
+        if args.theme not in themes:
+            die(f"no theme {args.theme!r} in themes.md")
+        projects = [p for p in projects if p.theme == args.theme]
+    rows = thread_rows(projects)
+    if args.theme:
+        rows = [r for r in rows if r["project"] != "inbox" or args.theme in r["section"].lower()
+                or themes[args.theme].name.lower() in r["section"].lower()]
+    if args.json:
+        print(json.dumps(rows, indent=1, ensure_ascii=False))
+        return
+    for r in rows:
+        when = r["remind"] or r["gate"] or "-"
+        entry = r["entry"] if len(r["entry"]) <= 80 else r["entry"][:77] + "..."
+        print("\t".join([r["thread"], r["account"], "open" if r["open"] else "done", r["project"],
+                         r["section"], when, entry]))
+
+
 def fetch_age(repo):
     common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     fh = os.path.join(common, "FETCH_HEAD")
@@ -1592,6 +1713,10 @@ def main():
     p.add_argument("--repo")
     p.add_argument("--branch")
     p.set_defaults(fn=cmd_find)
+    p = sub.add_parser("threads")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--theme")
+    p.set_defaults(fn=cmd_threads)
     p = sub.add_parser("landed")
     p.add_argument("projects", nargs="*")
     p.add_argument("--repo")

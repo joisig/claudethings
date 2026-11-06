@@ -361,6 +361,116 @@ class TestDerived(Fixture):
         self.assertEqual(P.reentry_minutes(p, TODAY + dt.timedelta(days=30)), 30)
 
 
+SH = "https://mail.superhuman.com/joi@crankwheel.com/thread/"
+MAIL = """
+# Mail links
+
+State: active · Re-entry: low · Created: 2026-10-01 · Touched: 2026-10-02
+
+## Brief
+- See also {sh}aaaa000000000001 and the search link https://mail.superhuman.com/joi@crankwheel.com/search/emma%40x.com/thread/aaaa000000000002.
+
+## Waiting on others
+- [ ] Two threads in one key
+  - Waiting: @rodion since 2026-10-01
+  - Thread: {sh}aaaa000000000003 · https://mail.google.com/mail/?authuser=joi%40crankwheel.com#all/aaaa000000000004
+
+## Ready for me
+- [ ] Deadline only
+  - Due: 2026-11-16
+  - Thread: {sh}aaaa000000000003
+- [ ] No date at all
+  - Thread: https://mail.google.com/mail/u/0/#inbox/aaaa000000000005
+
+## Later
+- [ ] Gated
+  - Not before: after crankwheel/diag
+  - Thread: {sh}aaaa000000000006
+
+## Backlog
+- Idea: from {sh}aaaa000000000007
+
+## Done
+- [x] Finished
+  - Thread: {sh}aaaa000000000008
+
+## Log
+- 2026-10-02 10:00 · ~5 min · read {sh}aaaa000000000009
+"""
+
+
+class TestThreads(Fixture):
+    def setUp(self):
+        super().setUp()
+        write(os.path.join(self.root, "crankwheel", "mail.md"), MAIL.format(sh=SH))
+        write(os.path.join(self.root, "inbox.md"), f"""
+            # Inbox
+
+            ## CrankWheel (from the bootstrap)
+            - Something from {SH}aaaa00000000000a
+
+            ## Bella Books
+            - Other theme https://mail.superhuman.com/joi@bellabooksai.com/thread/aaaa00000000000b
+            """)
+        write(os.path.join(self.root, "archive", "personal", "old.md"), f"""
+            # Old
+
+            State: done · Re-entry: low · Created: 2026-01-01 · Touched: 2026-01-02
+
+            ## Backlog
+            - Idea: {SH}aaaa00000000000c
+            """)
+
+    def rows(self):
+        _, _, projects = self.load()
+        return P.thread_rows(projects)
+
+    def by(self, rows, thread):
+        return [r for r in rows if r["thread"] == thread]
+
+    def test_links_and_accounts(self):
+        self.assertEqual(P.thread_links(f"{SH}abc · https://mail.superhuman.com/thread/1"),
+                         [("abc", "joi@crankwheel.com"), ("1", None)])
+        self.assertEqual(P.thread_links("https://mail.google.com/mail/u/joi@x.com/#inbox/1a1b08da1574b72c"),
+                         [("1a1b08da1574b72c", "joi@x.com")])
+        rows = self.rows()
+        (fixture,) = self.by(rows, "1")
+        self.assertEqual((fixture["account"], fixture["open"], fixture["remind"]), ("unknown", True, d(-1)))
+        (search,) = self.by(rows, "aaaa000000000002")
+        self.assertEqual((search["section"], search["account"]), ("Brief", "joi@crankwheel.com"))
+        (gmail,) = self.by(rows, "aaaa000000000004")
+        self.assertEqual((gmail["account"], gmail["section"]), ("joi@crankwheel.com", "Waiting on others"))
+        (u0,) = self.by(rows, "aaaa000000000005")
+        self.assertEqual((u0["account"], u0["remind"], u0["gate"]), ("unknown", None, None))
+
+    def test_one_thread_in_two_items_and_dates(self):
+        rows = self.by(self.rows(), "aaaa000000000003")
+        self.assertEqual([r["entry"] for r in rows], ["Two threads in one key", "Deadline only"])
+        self.assertEqual(rows[0]["waiting"], ["@rodion"])
+        self.assertEqual(rows[1]["remind"], "2026-11-12")   # Mon Nov 16 minus 2 working days
+        (gated,) = self.by(self.rows(), "aaaa000000000006")
+        self.assertEqual((gated["remind"], gated["gate"]), (None, "after crankwheel/diag"))
+
+    def test_open_and_done(self):
+        rows = self.rows()
+        state = {r["thread"]: r["open"] for r in rows}
+        self.assertTrue(state["aaaa000000000007"])        # Backlog line
+        self.assertFalse(state["aaaa000000000008"])       # checked item in Done
+        self.assertFalse(state["aaaa000000000009"])       # Log line
+        self.assertFalse(state["aaaa00000000000c"])       # archived project
+        (inbox,) = self.by(rows, "aaaa00000000000a")
+        self.assertEqual((inbox["project"], inbox["open"]), ("inbox", True))
+
+    def test_cli(self):
+        rows = json.loads(self.run_tool("threads", "--json").stdout)
+        self.assertEqual(len(rows), len(self.rows()))
+        out = self.run_tool("threads", "--theme", "crankwheel").stdout
+        self.assertIn("aaaa00000000000a", out)            # inbox.md, CrankWheel heading
+        self.assertNotIn("aaaa00000000000b", out)         # inbox.md, other heading
+        self.assertNotIn("aaaa00000000000c", out)         # archive/personal
+        self.assertIn("\tdone\t", out)
+
+
 class TestCommands(Fixture):
     def test_fit(self):
         out = self.run_tool("fit", "--minutes", "50").stdout
