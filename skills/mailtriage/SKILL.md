@@ -131,6 +131,13 @@ Flags:
    Recommend: <outcome> · project/item · Size · delegate to @x · reminder date
    Options: leave · remind N days · project item · backlog · delegate · archive · skip
    ```
+   When you show a card, open its thread for Joi in Superhuman in Chrome, one card at a
+   time (never a whole batch at once):
+   ```bash
+   open -a "Google Chrome" "https://mail.superhuman.com/joi@crankwheel.com/thread/<thread_id>"
+   ```
+   Do the same when Joi asks to see a thread from a batch table. If `open` fails (in a
+   sandbox), put the link in the card and go on.
    Joi answers briefly ("2, delegate to Birta, remind Fri"). Comments go into the item's
    `How:` or the project's Brief. Notes to self are often terse: say what the note seems
    to mean, and ask when you cannot tell.
