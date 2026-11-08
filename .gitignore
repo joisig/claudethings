@@ -1,3 +1,6 @@
 .DS_Store
 tmp/
 __pycache__/
+
+# This file can expose secrets if checked in
+.claude/settings.local.json
