@@ -129,8 +129,12 @@ Flags:
    Where it stands: 2–3 lines (what was asked, promised, pending; who has the ball)
    Matches: crankwheel/<slug> "item" / none   (new since the entry: …)
    Recommend: <outcome> · project/item · Size · delegate to @x · reminder date
-   Options: leave · remind N days · project item · backlog · delegate · archive · skip
+   Options: ok · O1 <alternative> · O2 <alternative> · … · skip
    ```
+   `ok` always means "do the Recommend line as written". Number the card's other options
+   `O1`, `O2`, … (each concrete, e.g. "O1 remind Fri 20 Nov", "O2 archive only"), so Joi
+   can answer with the code alone. The alternatives come from: leave, remind N days,
+   project item, backlog, delegate, archive.
    When you show a card, open its thread for Joi in Superhuman in Chrome, one card at a
    time (never a whole batch at once):
    ```bash
@@ -138,7 +142,7 @@ Flags:
    ```
    Do the same when Joi asks to see a thread from a batch table. If `open` fails (in a
    sandbox), put the link in the card and go on.
-   Joi answers briefly ("2, delegate to Birta, remind Fri"). Comments go into the item's
+   Joi answers briefly ("ok", "O2", or "O1 but remind Fri"). Comments go into the item's
    `How:` or the project's Brief. Notes to self are often terse: say what the note seems
    to mean, and ask when you cannot tell.
 4. **Apply** after each card or table, in this order: tracker edits (Edit/Write), then
