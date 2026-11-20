@@ -1,6 +1,15 @@
 - Prefer to fail fast in Erlang and Elixir code unless the error is absolutely truly recoverable
 - When writing files into a repo's local `./tmp/` folder, put them in a subfolder named after the date the session or project first started writing there plus a thematic subject, all separated by dashes, e.g. `tmp/2026-09-29-dk-api-needs/`. Keep using that same folder for the rest of the session or project rather than starting a new dated folder each day.
 
+## Running tests
+
+- In general, do not run the full test suite. Run only the narrow tests that relate to your work.
+- Run the full suite in these cases:
+  - The `wtconsolidate` skill. It always runs all tests.
+  - A large merge where you resolved mechanical or semantic merge conflicts.
+  - Any agent that prepares code for a release, for example one that writes a test plan and runs automated tests against it (unit tests and browser-based QA).
+  - Shipping a branch for review. Exception: in `~/w/protos` and its worktrees, all tests run at `git push` time anyway, so do not also run them before the push.
+
 ## Adversarial review (the `advreview` skill)
 
 - **Plans:** run `advreview` on the first version of any plan before you show it to me. You can still ask me the questions that come out of the review. For later versions of a plan, run it only when I ask.
