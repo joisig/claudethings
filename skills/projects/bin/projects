@@ -52,7 +52,7 @@ SECTIONS = ["Goal", "Brief", "Work", "Waiting on others", "Ready for me", "Later
 ITEM_SECTIONS = ["Waiting on others", "Ready for me", "Later", "Done"]
 OPEN_SECTIONS = ["Waiting on others", "Ready for me", "Later"]
 ITEM_KEYS = ["Waiting", "Not before", "Due", "Size", "Needs", "Unblocks", "Thread", "PR",
-             "How", "Then"]
+             "Repro", "Screenshot", "How", "Then"]
 STATES = ["active", "paused", "done", "dropped"]
 REENTRY_MINUTES = {"low": 5, "medium": 15, "high": 30}
 REENTRY_LEVELS = ["low", "medium", "high"]
@@ -626,12 +626,23 @@ def validate(themes, people, projects):
             for h in handles:
                 if h not in people:
                     errors.append(f"{iw}: unknown handle {h} (not in people.md)")
+            for shot in screenshot_paths(it):
+                if os.path.isabs(shot) or shot.startswith("~") or ".." in shot.split("/"):
+                    errors.append(f"{iw}: a Screenshot is a path inside the tracker, relative to its "
+                                  f"root, e.g. crankwheel/screenshots/<file>.png: {shot!r}")
+                elif not os.path.isfile(os.path.join(PROJECTS_DIR, shot)):
+                    errors.append(f"{iw}: no screenshot file at {shot}")
             if it.not_before and it.not_before[0] == "after":
                 try:
                     find_ref(projects, it.not_before[1], it.not_before[2])
                 except ParseError as e:
                     errors.append(f"{iw}: Not before: {e}")
     return errors
+
+
+def screenshot_paths(it):
+    """The paths of an item's 'Screenshot:' key, relative to the tracker root."""
+    return [x.strip() for x in it.keys.get("Screenshot", "").split("·") if x.strip()]
 
 
 def cmd_check(args):

@@ -291,6 +291,25 @@ class TestValidate(Fixture):
         self.assertTrue(any("needs 'Not before:'" in e for e in errs), errs)
         self.assertTrue(any("unknown handle @nobody" in e for e in errs), errs)
 
+    def test_screenshot_must_exist_inside_the_tracker(self):
+        path = os.path.join(self.root, "crankwheel", "diag.md")
+        with open(path) as f:
+            text = f.read()
+        shot = "crankwheel/screenshots/2026-11-24-login.png"
+        with open(path, "w") as f:
+            f.write(text.replace("  - Unblocks: @yuliia\n", "  - Unblocks: @yuliia\n"
+                                 "  - Repro: log in twice\n"
+                                 f"  - Screenshot: {shot} · /tmp/x.png\n"))
+        errs = self.errors()
+        self.assertTrue(any(f"no screenshot file at {shot}" in e for e in errs), errs)
+        self.assertTrue(any("relative to its root" in e for e in errs), errs)
+        write(os.path.join(self.root, shot), "png")
+        with open(path, "w") as f:
+            f.write(text.replace("  - Unblocks: @yuliia\n", f"  - Unblocks: @yuliia\n  - Screenshot: {shot}\n"))
+        self.assertEqual(self.errors(), [])
+        # A screenshots folder is not a project.
+        self.assertEqual([p.ident for p in self.load()[2]], ["crankwheel/diag"])
+
     def test_reference_to_missing_or_ambiguous_item(self):
         path = os.path.join(self.root, "crankwheel", "diag.md")
         with open(path) as f:

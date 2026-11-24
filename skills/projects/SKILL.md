@@ -1,6 +1,6 @@
 ---
 name: projects
-description: Joi's project tracker in ~/p/projects - every multi-session project across CrankWheel, Bella Books, Quarter, Snilli, Somatic, Cardinal, Personal and Grosvenor, with briefs to resume from, to-dos, waits on people and dates, and the backlog. Use when Joi asks what is going on, what is next for a project, when the next step can happen, who to nudge, what fits the time Joi has ("I have 40 minutes"), to add something to a project's to-dos or backlog, to start a project, to tidy up or close projects; and for the handoff when we wrap up work that belongs to a project (the global CLAUDE.md says when).
+description: Joi's project tracker in ~/p/projects - every multi-session project across CrankWheel, Bella Books, Quarter, Snilli, Somatic, Cardinal, Personal and Grosvenor, with briefs to resume from, to-dos, waits on people and dates, and the backlog. Use when Joi asks what is going on, what is next for a project, when the next step can happen, who to nudge, what fits the time Joi has ("I have 40 minutes"), to add something to a project's to-dos or backlog, to log a bug (`/projects bug CONTEXT DESCRIPTION`, `/projects smallbug CONTEXT DESCRIPTION`), to start a project, to tidy up or close projects; and for the handoff when we wrap up work that belongs to a project (the global CLAUDE.md says when).
 ---
 
 # projects — Joi's project tracker
@@ -164,6 +164,8 @@ markdown editors add on save (`\~`, `&gt;`).
 | `Unblocks:` | handles of people waiting for this item |
 | `Thread:` | Superhuman thread link; several are separated by ` · ` (a key cannot repeat) |
 | `PR:` | PR URL |
+| `Repro:` | for a bug: where it shows and how to make it happen |
+| `Screenshot:` | for a bug: path of an image in the tracker, relative to its root (`crankwheel/screenshots/2026-11-24-login-loop.png`); several are separated by ` · `. `check` fails when the file is missing |
 | `How:` | for a wait: exactly what to check when the wait ends, and what good looks like |
 | `Then:` | what follows once it is done |
 
@@ -195,6 +197,7 @@ the ball (`Waiting:` handles).
 
 | Joi says | You do |
 |---|---|
+| `bug CONTEXT DESCRIPTION` / `smallbug CONTEXT DESCRIPTION` | See "Bugs" |
 | "Add X to the backlog / to-dos of Y" | Add it in the right section with the keys you can fill in (CrankWheel: the delegation question first). Save |
 | "What's next for Y?" / "When can we take the next step?" | Read the project; answer from its items and dates |
 | "What's going on?" / "Overview of CrankWheel" | `render`, then read `overview.md` or the theme README, and summarize |
@@ -205,6 +208,69 @@ the ball (`Waiting:` handles).
 | "Start a project for this" | Create the file from what this session knows, with a full brief. Save |
 | "Tidy up projects" | The tidy-up run |
 | Something with no project yet | `inbox.md`, or ask which project |
+
+## Bugs
+
+`/projects bug CONTEXT DESCRIPTION` and `/projects smallbug CONTEXT DESCRIPTION` log a
+bug as an item. The first word of the arguments is CONTEXT; the rest is DESCRIPTION.
+
+**CONTEXT** names a theme, or a project in it. Match it to the theme folder or name in
+`themes.md` and their short forms (`CW` = crankwheel, `Bella` or `BB` = bellabooks),
+to a repo folder name (`protos` = crankwheel, `lestrarvinur` = personal), or to a
+project slug or title (`CW diag`, or `session-diag`). If it matches nothing or more
+than one theme, ask.
+
+**The item.** In "Ready for me", text `Bug: <DESCRIPTION, shortened to one line>`.
+Keys: `Repro:` with the rest of what Joi said (where it shows, steps, account,
+browser), `Screenshot:` (below), `Thread:` when it came from mail, and `Size:` only
+when you can guess it. Do not investigate the bug or fix it unless Joi asks: this is
+capture. Save, then tell Joi in one line where it went.
+
+**`bug`:** find the project the bug belongs to. When CONTEXT names a project, use it.
+Otherwise read the titles, goals and briefs of the theme's open projects (`render`,
+then the theme README, or grep the theme folder) and choose the project whose work the
+bug is in. When one fits clearly, add it there. When several fit, ask, with the
+candidates. When none fits, ask: the theme's small bugs, a new project, or `inbox.md`.
+
+**`smallbug`:** add it to the theme's small-bugs project, `<theme>/small-bugs.md`.
+Create it when it does not exist:
+
+```markdown
+# <Theme name> small bugs
+
+State: active · Re-entry: low · Created: <today> · Touched: <today>
+
+## Goal
+
+Small bugs in <Theme name>, each fixable in one session. A standing list, not a real project: it never closes.
+
+## Ready for me
+```
+
+The small-bugs project is the one exception to "a project spans more than one
+session": it collects one-session fixes. The tidy-up never proposes to close it. A fix
+of one of its bugs gets the normal handoff: the item moves to "Done" with the PR or
+commit, and a log line.
+
+**Screenshots.** When Joi gives a screenshot with the bug, store it in the tracker:
+`<theme>/screenshots/<YYYY-MM-DD>-<short-slug>.<ext>` (today's date, a slug from the
+description; add `-2`, `-3` for more). This is the one case where you copy a file into
+the tracker with a shell command: `cp -n <source> <target>` (`mkdir -p` the folder
+first; never overwrite). Put the path, relative to the tracker root, in `Screenshot:`,
+and list the image in `save` with the project file. Sources:
+
+- A file path (`~/Desktop/Screenshot ....png`, a dragged-in file): copy it.
+- An image pasted into the chat, with no path: you cannot write its bytes yourself.
+  Run `~/p/claudethings/tools/checkscreenshot.py 1` (it copies the latest Desktop
+  screenshot to `/tmp/screenshots-for-claude/` and prints the path), Read that file,
+  and copy it only when it is the same image. If not, ask Joi for the file's path.
+- "The last 2 screenshots": `checkscreenshot.py 2`, the same way.
+
+Screenshots stay in the theme's folder when a project is archived or a bug moves to
+another project, so the paths stay valid.
+
+**CrankWheel bugs:** capture first, then the delegation question in one line (see
+"Delegation"). When Joi delegates, move the item to "Waiting on others".
 
 ## Delegation (themes with `Delegation: on`: CrankWheel)
 
@@ -280,6 +346,8 @@ Projects are not closed eagerly. On "tidy up projects":
    without a handoff.
 3. `projects next` for pending handoffs (sessions that ended without one).
 4. Email threads only when Joi asks.
+
+The `small-bugs` projects are never closed: report only their bugs whose fixes landed.
 
 Then propose one list, project by project: **close** (`State: done`, move to
 `archive/<theme>/`), **chunk landed** (check items, keep open), **stale** (ask), or
