@@ -619,10 +619,8 @@ class TestCommands(Fixture):
 
     def test_saving_only_the_inbox_is_no_handoff(self):
         sh(self.root, "git", "init", "-q", "-b", "main")
-        # The tool finds its session by walking up to a PID listed in sessions/*.json;
-        # this test process is an ancestor of the tool's process.
-        write(os.path.join(self.claude, "sessions", "1.json"),
-              json.dumps({"pid": os.getpid(), "sessionId": "t1"}))
+        # The session comes from the environment, so the test needs no ps (sandboxes forbid it).
+        self.env["CLAUDE_CODE_SESSION_ID"] = "t1"
         write(os.path.join(self.root, "inbox.md"), "- something\n")
         self.run_tool("save", "-m", "inbox", "inbox.md")
         log = os.path.join(self.root, ".git", "projects-handoffs.jsonl")
@@ -638,6 +636,25 @@ class TestCommands(Fixture):
         self.run_tool("save", "-m", "diag", "crankwheel/diag.md")
         log = os.path.join(self.root, ".git", "projects-handoffs.jsonl")
         self.assertEqual(P.read_jsonl(log)[0]["session"], "env1")
+
+    def test_session_from_the_parent_pids(self):
+        # Without CLAUDE_CODE_SESSION_ID, walk up the parent PIDs to one that sessions/*.json
+        # knows. ps is faked: a sandbox forbids the real one.
+        write(os.path.join(self.claude, "sessions", "1.json"), json.dumps({"pid": 4242, "sessionId": "t1"}))
+        parents = {os.getpid(): 777, 777: 4242}
+        orig_run, orig_env = P.subprocess.run, os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+
+        def fake_ps(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 0, f"{parents.get(int(cmd[-1]), 1)}\n", "")
+        P.subprocess.run = fake_ps
+        try:
+            self.assertEqual(P.current_session_id(), "t1")
+            parents[777] = 1
+            self.assertIsNone(P.current_session_id())
+        finally:
+            P.subprocess.run = orig_run
+            if orig_env is not None:
+                os.environ["CLAUDE_CODE_SESSION_ID"] = orig_env
 
     def test_no_session_when_ps_is_forbidden(self):
         # A sandbox (safehouse) refuses to run ps; the lookup gives up instead of crashing.
