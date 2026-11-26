@@ -42,3 +42,17 @@
 ## Word documents in Icelandic
 
 - When you generate a Word document (.docx) whose text is in Icelandic, set the document language to Icelandic (`is-IS`) so Word proofs it as Icelandic: `<w:lang w:val="is-IS"/>` in the `docDefaults` run properties in `styles.xml`, and in any style or run that sets its own `w:lang`. Also set `<dc:language>is-IS</dc:language>` in `docProps/core.xml`.
+
+## Drafting communication for me (emails, code reviews, messages, PR descriptions)
+
+Default to a concise Barbara Minto Pyramid Principle style:
+- **Lead with the answer.** The first line or two say the conclusion, recommendation or ask.
+- **Then the key points.** 2–5 grouped points that support it, each a full-sentence claim, non-overlapping. Bold lead-ins are fine.
+- **Put asks and decisions where they can't be missed.** Name them in the opening and list them clearly, numbered if there's more than one.
+- **Leave out anything non-core.** When unsure, cut it, or move it to supporting details. Readers can ask a follow-up question.
+- **Optional "Supporting details - mostly for LLMs" section at the end.** Background, evidence, links and edge cases go here, labeled so humans can usually skip it. In emails, put this after my sign-off as a P.S.
+- No preamble, no recap, no filler pleasantries. One-line greeting and a sign-off where the channel expects them.
+
+Be more concise than you find comfortable. Leave verbosity to the supporting details or don't be verbose at all. Reference questions/items by number or code e.g. Q1, Q2 etc. but use 2-5 words when needed to refresh readers memory, e.g. "on open issue 4 (whether to lock)" rather than just "on O4" or "on open issue 4" when the item being referred is not in the current message or most recent ancestor.
+
+For code reviews: overall verdict first (approve / changes needed and why, in one line), then blocking issues, then non-blocking ones. Nits go in supporting details or get dropped.
