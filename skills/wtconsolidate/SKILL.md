@@ -450,6 +450,15 @@ and start it while they read the plan:
   merges does not have the change; ask the user to restart `./devprod.sh` first.
   Do not restart it yourself. Run the flows in a background sub-agent, so that
   the screenshots stay out of your context.
+- **Release smoke runs, approved, start at once:** the tiers of
+  `designdocs/RELEASE_SMOKE_TESTS.md`, on the trunk's code. Say each one's cost
+  when you start it. Tier A, `scripts/b20_browser_tests.sh` (the world check, no
+  model spend). Tier B, `scripts/smoke_hermetic.sh` (a new world with its own
+  server on a free port, about 2 USD and 5 minutes; evidence in
+  `tmp/smoke/<date>-<n>/index.html`). Tier C, the `bboo-erp-smoke` skill on
+  accounts 16, 90 and 123 (about 2 USD per account). Run them before the plan of
+  Step 9 is final, and leave what they cover out of the manual plan. Explain each
+  FAIL and BLOCKED: a BLOCKED case did not test its feature.
 - **Costs API money, ask first:** browser flows that upload or ingest a document,
   digitize, or make the agent run; the `expensiveintegration` tests and the
   reliability run from `TEST_PLAN_GUIDELINES.md`, for the themes that touch what

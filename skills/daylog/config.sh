@@ -9,7 +9,7 @@ REPOS=(
   /Users/joi/q/bboo/main
   /Users/joi/c/somatic
   /Users/joi/snilli/k/kloi
-  /Users/joi/q/cardinal
+  /Users/joi/q/card/main
   /Users/joi/p/claudethings
 )
 
